@@ -1,0 +1,23 @@
+# Dependencies and generated build output
+app/node_modules/
+app/dist/
+
+# Local preview and iterative design artifacts
+app/.preview-*.log
+app/tmp/
+app/design-comparison-*.png
+app/design-implementation-*.png
+app/design-responsive-*.png
+app/AGENTS.md
+app/.hallmark/
+
+# Local configuration and debug data
+*.chatbut
+chatbut.config.json
+chatbut-debug-*.jsonl
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
