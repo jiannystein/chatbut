@@ -328,6 +328,75 @@ test("a selected Space keeps its classification when its sidebar row becomes hid
   }
 });
 
+test("a Space reply waits for Google Chat to enable its send control", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <button aria-label="Google Account: Test User (test@example.com)"></button>
+    <section aria-label="List of spaces.">
+      <div role="listitem" data-group-id="space/project" data-display-timestamp="1">
+        <span>Project Space</span>
+      </div>
+    </section>
+    <main role="main" data-group-id="space/project">
+      <div role="group" data-id="space-message" data-user-id="sender">
+        <span data-message-id="space-message" data-member-id="user/sender">Sender</span>
+        <span data-user-email="test@example.com" data-user-mention-type="3">Test User</span>
+      </div>
+      <div role="textbox" contenteditable="true"></div>
+      <button aria-label="Send message" disabled>Send</button>
+    </main>
+  </body></html>`;
+  const { dom } = makeDom("https://chat.google.com/app/home", { html });
+  try {
+    const main = dom.window.document.querySelector("main");
+    const composer = main.querySelector('[role="textbox"]');
+    const send = main.querySelector('[aria-label="Send message"]');
+    composer.addEventListener("input", () => {
+      if (!composer.textContent) {
+        send.disabled = true;
+        return;
+      }
+      setTimeout(() => { send.disabled = false; }, 300);
+    });
+    send.addEventListener("click", () => {
+      main.insertAdjacentHTML("beforeend", `
+        <div role="group" data-id="outgoing-space-message" data-user-id="self">
+          <span data-message-id="outgoing-space-message" data-member-id="user/self">You</span>
+        </div>
+      `);
+    });
+    dom.window.eval(runtime);
+    const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
+    runtimeInstance.config = {
+      ...structuredClone(DEFAULT_CONFIG),
+      targeting: {
+        ...structuredClone(DEFAULT_CONFIG.targeting),
+        selectedGroups: [{ id: "space/project", label: "Project Space", kind: "space" }],
+      },
+    };
+    runtimeInstance.enabled = true;
+    runtimeInstance.scheduleOverride = true;
+    runtimeInstance.selfEmail = "test@example.com";
+    const debugEvents = [];
+    runtimeInstance.debug = {
+      async write(event, details) { debugEvents.push({ event, details }); },
+    };
+
+    await runtimeInstance.sendFor("space/project", "vault1", "space-message");
+
+    assert.equal(runtimeInstance.sessionCount, 1);
+    assert.equal(runtimeInstance.sessionChats.has("space/project"), true);
+    assert.equal(runtimeInstance.processed.has("outgoing-space-message"), true);
+    assert.equal(debugEvents.some(({ event }) => event === "sent"), true);
+    assert.equal(
+      debugEvents.some(({ event, details }) => event === "skip" && details.reason === "send_not_ready"),
+      false,
+    );
+    runtimeInstance.stop("Test complete.");
+  } finally {
+    dom.window.close();
+  }
+});
+
 test("bookmarklet explains how to recover when Chrome blocks the helper tab", () => {
   const { dom } = makeDom(
     "https://chat.google.com/app/home",
