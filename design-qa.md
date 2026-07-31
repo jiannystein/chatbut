@@ -23,6 +23,8 @@ spacing, and compact utility density. This correction pass replaced
 browser-native time controls with explicit 24-hour inputs, made the workbench
 widget preview fully inert, consolidated conversation targeting, and reduced
 the live widget to stationary session controls and metrics.
+The follow-up pass centered the provider-key icon, added a compact save toast,
+and made the intentional automation-tab/clean-tab handoff explicit.
 
 ## Interaction checks
 
@@ -38,6 +40,10 @@ the live widget to stationary session controls and metrics.
   provider selection, debug export/reset, and Stop/Enable states are covered.
 - Invalid provider credentials show an actionable non-secret error and are not
   saved.
+- Invalid configuration imports are rejected before local replacement and
+  offer a clean export recovery path.
+- Saved settings confirm that bookmark reinstallation is unnecessary unless
+  the Chatbut version changes.
 - Information tooltips disclose off-by-default invitation behavior.
 - LLM adaptation remains optional; saved-response mode is complete.
 

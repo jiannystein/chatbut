@@ -7,6 +7,7 @@ import {
   mayInspectConversation,
   maySend,
   mentionTargetsSelf,
+  nonRepeatingTemplate,
   normalizeConversationLabel,
   normalizeDraft,
   randomDelayMs,
@@ -32,6 +33,19 @@ test("random templates select from the requested vault", () => {
   assert.equal(randomTemplate(["first", "second"], () => 0), "first");
   assert.equal(randomTemplate(["first", "second"], () => 0.99), "second");
   assert.equal(randomTemplate([], () => 0), "");
+});
+
+test("template selection avoids historical and session repeats when alternatives exist", () => {
+  const vault = ["First response", "Second response", "Third response"];
+  assert.equal(nonRepeatingTemplate(vault, {
+    recentMessages: [{ text: "Earlier, Chatbut sent First response" }],
+    usedTemplates: ["Second response"],
+    random: () => 0,
+  }), "Third response");
+  assert.equal(nonRepeatingTemplate(["First response", "Second response"], {
+    usedTemplates: ["First response", "Second response"],
+    random: () => 0,
+  }), "First response");
 });
 
 test("targeting applies separate direct, group-DM, and Space policies", () => {

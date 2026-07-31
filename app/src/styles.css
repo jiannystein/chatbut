@@ -1223,10 +1223,12 @@ button.field-row:active {
 
 .input-shell > svg:first-child {
   position: absolute;
+  inset-block-start: 50%;
   inset-inline-start: var(--space-sm);
   z-index: 1;
   color: var(--color-muted);
   pointer-events: none;
+  transform: translateY(-50%);
 }
 
 .input-shell input {
@@ -2153,9 +2155,51 @@ button.field-row:active {
   .icon-button,
   .target-list button,
   .conversation-list button,
-  .message-row > button {
+.message-row > button {
     min-height: 3rem;
   }
+}
+
+.save-toast {
+  position: fixed;
+  z-index: 20;
+  inset-inline-end: var(--space-lg);
+  inset-block-end: var(--space-lg);
+  width: min(27rem, calc(100vw - 2rem));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: var(--rule-thin) solid var(--color-support);
+  border-radius: var(--radius-md);
+  background: var(--color-support-soft);
+  color: var(--color-ink);
+  box-shadow: 0 0.75rem 2rem var(--color-shadow);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.save-toast > svg {
+  color: var(--color-support);
+}
+
+.save-toast > button {
+  inline-size: 2rem;
+  block-size: 2rem;
+  display: grid;
+  place-items: center;
+  margin: calc(var(--space-xs) * -1);
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+}
+
+.install-strip__button > span:first-child {
+  font-size: var(--text-lg);
+  line-height: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {

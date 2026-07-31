@@ -14,6 +14,23 @@ export function randomTemplate(vault, random = Math.random) {
   return vault[Math.min(vault.length - 1, Math.floor(random() * vault.length))];
 }
 
+export function nonRepeatingTemplate(
+  vault,
+  { recentMessages = [], usedTemplates = [], random = Math.random } = {},
+) {
+  const templates = Array.isArray(vault) ? vault : [];
+  if (!templates.length) return "";
+  const recent = recentMessages.map((item) => String(item?.text ?? item).toLowerCase()).join(" ");
+  const unseen = templates.filter(
+    (template) => !usedTemplates.includes(template) && !recent.includes(template.toLowerCase()),
+  );
+  const notPrevious = templates.filter((template) => template !== usedTemplates.at(-1));
+  return randomTemplate(
+    unseen.length ? unseen : notPrevious.length ? notPrevious : templates,
+    random,
+  );
+}
+
 export function isTargetAllowed(config, conversation) {
   if (!conversation?.id) return false;
   if (conversation.kind === "direct") {

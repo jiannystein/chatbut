@@ -52,8 +52,8 @@ must stay awake, and Google interface changes can require Chatbut updates.
 | 1:1 direct messages | Everyone except conversations on the exclusion list |
 | Multi-person DMs | Everyone except exclusions, but only for a verified `@mention` or direct reply |
 | Spaces | Selected Spaces only, and only for a verified `@mention` or direct reply |
-| First reply | Random Vault 1 template after a configurable delay; default 30–90 seconds |
-| Follow-up | At most one Vault 2 reply after a configurable cooldown and another eligible message; default 15 minutes |
+| First reply | Non-repeating Vault 1 template after a configurable 1–60 second delay; default 5–10 seconds |
+| Follow-up | At most one Vault 2 reply after a 1–5 minute cooldown and another eligible message; default 1 minute |
 | LLM adaptation | Optional BYOK connections for DeepSeek, OpenAI, Claude, Kimi Global, or Kimi China |
 | Provider safety | Model discovery plus a tiny completion test before a connection is saved; one active provider at a time |
 | Invitations | Separate, off-by-default controls for human 1:1 requests and Space invitations |
@@ -83,6 +83,12 @@ Chatbut sends the original saved response.
    tab for normal use.
 7. In the dedicated automation tab, review the compact status panel and select
    **Enable**.
+
+Setting changes save locally and reach the connected bookmark automatically.
+Re-add the bookmark only after Chatbut itself is updated. Invalid or incomplete
+JSON backups are rejected before they can replace local state; Chatbut offers
+to export a clean replacement, while the bad disk file must be deleted
+manually.
 
 The configurator may be closed after the bookmark connects. Chatbut remains
 disabled after Google Chat reloads, Chrome restarts, or the tab closes; click
@@ -123,6 +129,10 @@ undocumented Google private APIs. At enable time it records a baseline, then
 coalesces new message bursts, filters out excluded and non-opted-in
 conversations before navigating, verifies the conversation and composer
 immediately before sending, and restores the previously open chat.
+Delayed sends are serialized so several chats arriving together cannot race
+the single automation tab. Template selection also checks recent visible chat
+history and current-session use to avoid repeating the same saved response
+when another response is available.
 
 The bookmark opens a helper at the Chatbut origin. The helper transfers a
 paired `SharedWorker` message port to the exact Google Chat opener, then turns
