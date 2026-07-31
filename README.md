@@ -79,8 +79,9 @@ Chatbut sends the original saved response.
 5. Select **Open Google Chat**, or use an existing
    `https://chat.google.com/app/home` tab.
 6. While on the Google Chat page, click the **💬 Chatbut** bookmark. The tab
-   becomes the dedicated automation tab and Chatbut opens a clean Google Chat
-   tab for normal use.
+   asks for confirmation, becomes the dedicated automation tab, and opens a
+   clean Google Chat tab for normal use. Leave the original automation tab
+   open.
 7. In the dedicated automation tab, review the compact status panel and select
    **Enable**.
 
@@ -89,6 +90,10 @@ Re-add the bookmark only after Chatbut itself is updated. Invalid or incomplete
 JSON backups are rejected before they can replace local state; Chatbut offers
 to export a clean replacement, while the bad disk file must be deleted
 manually.
+
+Chrome controls the globe icon used for JavaScript bookmarks. If the bookmark
+bar hides Chatbut's label, right-click the bookmark, select **Edit**, and set
+the name to **💬 Chatbut**.
 
 The configurator may be closed after the bookmark connects. Chatbut remains
 disabled after Google Chat reloads, Chrome restarts, or the tab closes; click
@@ -175,7 +180,8 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
   attached to an invitation accepted during the session is the explicit
   exception.
 - A manual user message stops automation for that conversation until the next
-  enable.
+  enable. Chatbut's own composer activity and outgoing messages do not trigger
+  this guard.
 - Multi-person DMs require a verified mention or direct reply even when they
   are not excluded.
 - Spaces must be selected and the triggering message must mention or directly
