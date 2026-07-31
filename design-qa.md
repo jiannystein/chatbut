@@ -21,12 +21,17 @@ reference's main composition.
   visibly stateful.
 - The bookmarklet link retains a real `javascript:` URL after React renders and
   exposes a drag payload suitable for Chrome's bookmarks bar.
+- The configurator owns the local file and exposes an **Open Google Chat**
+  action. The paired bookmark creates a short-lived tab bridge and offers a
+  clear **Retry connection** recovery state instead of opening a second file
+  picker.
 - AI adaptation can be switched off; saved response vaults remain usable.
 - Independent 1:1 and Space invitation toggles are present and default off.
 - Information tooltips use an 800 ms hover delay and immediate keyboard-focus
   disclosure.
 - New/open/save, schedule, delay, vault, targeting, key visibility, language,
-  debug, and stop/enable states have explicit disabled/focus behavior.
+  debug, connected-tab, retry, and stop/enable states have explicit
+  disabled/focus behavior.
 
 ## Layout and accessibility
 
