@@ -9,6 +9,7 @@ import {
   normalizeConfig,
   validateConfig,
 } from "../src/config.js";
+import { prepareImportedConfig } from "../src/file-store.js";
 
 test("normalization constrains values and migrates a legacy DeepSeek config", () => {
   const normalized = normalizeConfig({
@@ -28,7 +29,7 @@ test("normalization constrains values and migrates a legacy DeepSeek config", ()
   assert.deepEqual(normalized.schedule.days, [1, 2]);
   assert.deepEqual(normalized.schedule.windows, [{ start: "06:00", end: "08:00" }]);
   assert.equal(normalized.delays.minimumSeconds, 1);
-  assert.equal(normalized.delays.maximumSeconds, 3_600);
+  assert.equal(normalized.delays.maximumSeconds, 60);
   assert.equal(normalized.delays.followUpMinutes, 1);
   assert.deepEqual(normalized.responses.vault1, ["hello"]);
   assert.equal(normalized.llm.activeProviderId, "deepseek");
@@ -36,6 +37,27 @@ test("normalization constrains values and migrates a legacy DeepSeek config", ()
   assert.equal(normalized.llm.connections[0].status, "needs-attention");
   assert.equal(normalized.llm.recentMessageCount, 10);
   assert.equal(normalized.llm.language, "en");
+});
+
+test("old timing defaults migrate to the shorter POC defaults", () => {
+  const normalized = normalizeConfig({
+    ...DEFAULT_CONFIG,
+    delays: { minimumSeconds: 30, maximumSeconds: 90, followUpMinutes: 15 },
+  });
+  assert.deepEqual(normalized.delays, {
+    minimumSeconds: 5,
+    maximumSeconds: 10,
+    followUpMinutes: 1,
+  });
+});
+
+test("import validation rejects non-Chatbut JSON before it can replace local state", () => {
+  assert.throws(
+    () => prepareImportedConfig({ arbitrary: "data" }),
+    /incomplete or corrupt/i,
+  );
+  const imported = prepareImportedConfig(DEFAULT_CONFIG);
+  assert.equal(imported.version, 2);
 });
 
 test("multiple same-day windows are active independently", () => {

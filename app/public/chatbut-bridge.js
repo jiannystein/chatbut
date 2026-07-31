@@ -37,7 +37,7 @@ if (
       [worker.port],
     );
     if (mode === "handoff") {
-      status.textContent = "Connected. Opening a clean Google Chat tab…";
+      status.textContent = "Connected. The first tab is now your automation tab; opening a clean Google Chat tab…";
       window.setTimeout(() => location.replace(cleanGoogleChatUrl), 250);
     } else {
       status.textContent = "Connected. This helper tab can close.";
