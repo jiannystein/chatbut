@@ -1,0 +1,45 @@
+const status = document.getElementById("bridge-status");
+const [token = "", nonce = ""] = location.hash.slice(1).split(".");
+const openerOrigin = location.hostname === "localhost"
+  ? "http://127.0.0.1:4187"
+  : "https://chat.google.com";
+
+function fail(message) {
+  status.textContent = message;
+  status.dataset.tone = "error";
+}
+
+if (
+  !window.opener
+  || window.opener.closed
+  || !/^[A-Za-z0-9_-]{32,128}$/.test(token)
+  || nonce.length < 8
+) {
+  fail("This connection request is invalid. Close this tab and retry Chatbut.");
+} else if (typeof SharedWorker !== "function") {
+  fail("SharedWorker is blocked in this Chrome profile.");
+} else {
+  try {
+    const worker = new SharedWorker("./chatbut-bridge-worker.js", {
+      name: "chatbut-config-bridge",
+    });
+    worker.port.start();
+    worker.port.postMessage({
+      type: "chatbut:register",
+      role: "runtime",
+      token,
+    });
+    window.opener.postMessage(
+      {
+        type: "chatbut:bridge-port",
+        nonce,
+      },
+      openerOrigin,
+      [worker.port],
+    );
+    status.textContent = "Connected. This helper tab can close.";
+    window.setTimeout(() => window.close(), 250);
+  } catch {
+    fail("Chrome could not create the local Chatbut bridge.");
+  }
+}

@@ -3,6 +3,7 @@ import { normalizeConfig } from "./config.js";
 const DATABASE_NAME = "chatbut-local";
 const STORE_NAME = "handles";
 const CONFIG_HANDLE_KEY = "config";
+const debugFileIndexes = new WeakMap();
 
 const pickerTypes = [
   {
@@ -137,4 +138,30 @@ export async function chooseDebugFolder() {
     throw new Error("Folder access is unavailable in this Chrome window.");
   }
   return window.showDirectoryPicker({ mode: "readwrite" });
+}
+
+export async function appendDebugLog(folder, entry, maximumLogBytes = 10_000_000) {
+  if (!folder) throw new Error("Choose a debug folder in the configurator first.");
+  const serialized = JSON.stringify(entry).slice(0, 100_000);
+  const line = `${serialized}\n`;
+  const lineBytes = new TextEncoder().encode(line).byteLength;
+  let index = debugFileIndexes.get(folder) ?? 1;
+  let handle;
+  let file;
+  do {
+    handle = await folder.getFileHandle(
+      `chatbut-debug-${String(index).padStart(3, "0")}.jsonl`,
+      { create: true },
+    );
+    file = await handle.getFile();
+    if (file.size > 0 && file.size + lineBytes > maximumLogBytes) index += 1;
+  } while (file.size > 0 && file.size + lineBytes > maximumLogBytes);
+  debugFileIndexes.set(folder, index);
+  const writable = await handle.createWritable({ keepExistingData: true });
+  try {
+    await writable.seek(file.size);
+    await writable.write(line);
+  } finally {
+    await writable.close();
+  }
 }

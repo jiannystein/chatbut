@@ -72,19 +72,25 @@ saved template.
 4. If you want AI adaptation, enable it, add your own DeepSeek key, and validate
    it. AI is optional.
 5. Save the file.
-6. Open [Google Chat](https://chat.google.com/app/home), click the Chatbut
-   bookmark, choose the same configuration file, and select **Enable**.
+6. Open Google Chat, click the Chatbut bookmark, and select **Enable**. A
+   short-lived helper links the tabs automatically; Google Chat does not ask
+   for the file again.
 
-Reloading or closing the Google Chat tab disables Chatbut. This is intentional:
-the user must start every session explicitly.
+Keep both tabs open while Chatbut runs. Reloading or closing either tab breaks
+the session, and reloading or closing Google Chat disables automation. This is
+intentional: the user must start every session explicitly.
 
 ## How it works
 
 ```text
 GitHub Pages configurator
         │
-        ├── creates a local JSON configuration
+        ├── owns the local JSON configuration
+        ├── saves target and debug updates
         └── provides the generated bookmarklet
+                         │
+              short-lived tab bridge
+               + in-memory messages
                          │
                          ▼
                Google Chat browser tab
@@ -112,10 +118,21 @@ previously open.
 Opening conversations may mark them read or visibly change the interface for a
 moment.
 
+When clicked in Google Chat, the paired bookmark opens a short-lived helper on
+the configurator origin. It transfers a `SharedWorker` message port to Google
+Chat, then closes. The port relays configuration, target changes, and debug
+records only to the open configurator paired by a random local token. The
+configuration remains in memory in Google Chat and is not written to its local
+storage. File reads, file writes, and optional debug-log writes stay in the
+configurator tab.
+
 ## Privacy and security
 
 - The configuration and optional logs stay in files selected on the user's
   computer. Chatbut has no backend, account system, analytics, or telemetry.
+- The selected configuration is transferred in memory to the connected Google
+  Chat page for the active tab session. It is not persisted on the Google Chat
+  origin, but it is available to page code while the bookmarklet is running.
 - The optional DeepSeek API key is stored in plaintext in the configuration
   file. Anyone or any process that can read the file can read the key.
 - When AI adaptation is enabled, the configured 3–10 recent text messages and
@@ -148,8 +165,11 @@ See [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 ## Limitations
 
 - Chrome desktop only for the MVP.
-- Google Chat must remain open and the computer awake.
-- Managed-browser policy may block bookmarklets, file access, or DeepSeek.
+- The configurator must remain open when the bookmark is clicked in Google
+  Chat. Chrome must allow Chatbut's short-lived helper popup.
+- Both tabs must remain open and the computer awake.
+- Managed-browser policy may block bookmarklets, popups, configurator file
+  access, or DeepSeek.
 - Browser DOM automation is inherently fragile and can break after a Google
   Chat interface update.
 - Direct-reply detection is fail-closed: Chatbut skips a message unless it can

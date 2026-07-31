@@ -22,11 +22,17 @@ await build({
 
 const runtime = (await readFile(runtimePath, "utf8")).trim();
 const bookmarklet = `javascript:${encodeURIComponent(runtime)}`;
+const distributedBookmarklet = bookmarklet
+  .replace("__CHATBUT_PAIRING_TOKEN__", "a".repeat(32))
+  .replace(
+    "__CHATBUT_BRIDGE_URL__",
+    encodeURIComponent("https://jiannystein.github.io/chatbut/chatbut-bridge.html"),
+  );
 const budget = 32 * 1024;
-if (Buffer.byteLength(bookmarklet, "utf8") > budget) {
+if (Buffer.byteLength(distributedBookmarklet, "utf8") > budget) {
   throw new Error(
-    `Encoded bookmarklet is ${Buffer.byteLength(bookmarklet, "utf8")} bytes; budget is ${budget}.`,
+    `Distributed bookmarklet is ${Buffer.byteLength(distributedBookmarklet, "utf8")} bytes; budget is ${budget}.`,
   );
 }
 await writeFile(bookmarkletPath, `${bookmarklet}\n`, "utf8");
-console.log(`Bookmarklet: ${Buffer.byteLength(bookmarklet, "utf8")} / ${budget} bytes`);
+console.log(`Bookmarklet: ${Buffer.byteLength(distributedBookmarklet, "utf8")} / ${budget} bytes`);

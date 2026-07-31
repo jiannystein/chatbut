@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex">
+    <title>Connecting Chatbut</title>
+    <style>
+      :root { color-scheme: light; font: 16px/1.5 system-ui, sans-serif; }
+      body { display: grid; min-height: 100vh; margin: 0; place-items: center; background: #fffaf0; color: #191713; }
+      main { width: min(28rem, calc(100% - 2rem)); padding: 1.5rem; border: 1px solid #d5cbbb; border-radius: 1rem; background: white; }
+      h1 { margin: 0 0 .5rem; font: 700 1.5rem/1.2 Georgia, serif; }
+      p { margin: 0; color: #625c52; }
+      p[data-tone="error"] { color: #9f2e24; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Connecting Chatbut</h1>
+      <p id="bridge-status">Linking Google Chat to your open configurator…</p>
+    </main>
+    <script src="./chatbut-bridge.js"></script>
+  </body>
+</html>
