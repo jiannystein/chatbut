@@ -35,6 +35,7 @@ export const DEFAULT_CONFIG = Object.freeze({
     directExclusions: [],
     groupMode: "selected",
     selectedGroups: [],
+    indexedChats: [],
   },
   invitations: {
     autoAcceptDirect: false,
@@ -85,15 +86,19 @@ function cleanStringList(value, limit = 100) {
     .slice(0, limit);
 }
 
-function cleanTargetList(value, limit = 100) {
+function cleanTargetList(value, limit = 100, { requireKind = false } = {}) {
   if (!Array.isArray(value)) return [];
   return value
     .filter((item) => item && typeof item === "object")
-    .map((item) => ({
-      id: String(item.id ?? "").trim(),
-      label: String(item.label ?? "").trim(),
-    }))
-    .filter((item) => item.id && item.label)
+    .map((item) => {
+      const kind = ["direct", "group-direct", "space"].includes(item.kind) ? item.kind : "";
+      return {
+        id: String(item.id ?? "").trim(),
+        label: String(item.label ?? "").trim(),
+        ...(kind ? { kind } : {}),
+      };
+    })
+    .filter((item) => item.id && item.label && (!requireKind || item.kind))
     .slice(0, limit);
 }
 
@@ -223,6 +228,7 @@ export function normalizeConfig(input = {}) {
       directExclusions: cleanTargetList(targeting.directExclusions),
       groupMode: "selected",
       selectedGroups: cleanTargetList(targeting.selectedGroups),
+      indexedChats: cleanTargetList(targeting.indexedChats, 200, { requireKind: true }),
     },
     invitations: {
       autoAcceptDirect: Boolean(invitations.autoAcceptDirect),
@@ -321,9 +327,7 @@ export function validateConfig(config) {
 
 export function formatClock(value) {
   const [hourValue, minute] = value.split(":").map(Number);
-  const suffix = hourValue >= 12 ? "PM" : "AM";
-  const hour = hourValue % 12 || 12;
-  return `${hour}:${String(minute).padStart(2, "0")} ${suffix}`;
+  return `${String(hourValue).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 export function formatDayRange(days) {

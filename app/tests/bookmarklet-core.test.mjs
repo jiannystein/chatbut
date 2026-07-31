@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  classifyConversation,
   fuzzyScore,
   isTargetAllowed,
+  mayInspectConversation,
   maySend,
+  mentionTargetsSelf,
+  normalizeConversationLabel,
   normalizeDraft,
   randomDelayMs,
   randomTemplate,
@@ -12,7 +16,10 @@ import {
 } from "../src/bookmarklet/core.js";
 
 const targeting = {
-  directExclusions: [{ id: "dm/excluded", label: "Excluded" }],
+  directExclusions: [
+    { id: "dm/excluded", label: "Excluded" },
+    { id: "space/excluded-group-dm", label: "Excluded group DM" },
+  ],
   selectedGroups: [{ id: "space/allowed", label: "Allowed" }],
 };
 
@@ -27,9 +34,18 @@ test("random templates select from the requested vault", () => {
   assert.equal(randomTemplate([], () => 0), "");
 });
 
-test("targeting allows non-excluded DMs and only mentioned allowed Spaces", () => {
+test("targeting applies separate direct, group-DM, and Space policies", () => {
   assert.equal(isTargetAllowed({ targeting }, { id: "dm/person", kind: "direct" }), true);
   assert.equal(isTargetAllowed({ targeting }, { id: "dm/excluded", kind: "direct" }), false);
+  assert.equal(isTargetAllowed({ targeting }, {
+    id: "space/group-dm", kind: "group-direct", mentionedSelf: true,
+  }), true);
+  assert.equal(isTargetAllowed({ targeting }, {
+    id: "space/group-dm", kind: "group-direct", mentionedSelf: false, repliedToSelf: false,
+  }), false);
+  assert.equal(isTargetAllowed({ targeting }, {
+    id: "space/excluded-group-dm", kind: "group-direct", mentionedSelf: true,
+  }), false);
   assert.equal(isTargetAllowed({ targeting }, {
     id: "space/allowed", kind: "space", mentionedSelf: true,
   }), true);
@@ -39,6 +55,33 @@ test("targeting allows non-excluded DMs and only mentioned allowed Spaces", () =
   assert.equal(isTargetAllowed({ targeting }, {
     id: "space/other", kind: "space", mentionedSelf: true,
   }), false);
+});
+
+test("runtime prefilter avoids opening excluded or non-opted-in conversations", () => {
+  assert.equal(mayInspectConversation({ targeting }, { id: "dm/person", kind: "direct" }), true);
+  assert.equal(mayInspectConversation({ targeting }, { id: "dm/excluded", kind: "direct" }), false);
+  assert.equal(mayInspectConversation({ targeting }, { id: "space/group-dm", kind: "group-direct" }), true);
+  assert.equal(mayInspectConversation({ targeting }, { id: "space/other", kind: "space" }), false);
+  assert.equal(mayInspectConversation({ targeting }, { id: "space/allowed", kind: "space" }), true);
+});
+
+test("conversation classification uses the Google Chat sidebar section", () => {
+  assert.equal(classifyConversation("dm/person", "direct"), "direct");
+  assert.equal(classifyConversation("space/group-dm", "direct"), "group-direct");
+  assert.equal(classifyConversation("space/project", "space"), "space");
+  assert.equal(classifyConversation("space/project", "unknown"), "unknown");
+});
+
+test("conversation labels and self mentions are normalized fail-closed", () => {
+  assert.equal(
+    normalizeConversationLabel("Project Phoenix Press tab for more options."),
+    "Project Phoenix",
+  );
+  assert.equal(normalizeConversationLabel("Press tab for more options.", "Fallback"), "Fallback");
+  assert.equal(normalizeConversationLabel("Options Team"), "Options Team");
+  assert.equal(mentionTargetsSelf(["OTHER@example.com", "ME@example.com"], "me@example.com"), true);
+  assert.equal(mentionTargetsSelf(["OTHER@example.com"], "me@example.com"), false);
+  assert.equal(mentionTargetsSelf(["ME@example.com"], ""), false);
 });
 
 test("vault state requires a new trigger after the follow-up cooldown", () => {

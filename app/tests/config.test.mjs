@@ -159,8 +159,27 @@ test("invitation options are independently configurable and default off", () => 
   assert.equal(normalized.invitations.autoAcceptSpaces, false);
 });
 
-test("schedule summary uses human-readable times", () => {
-  assert.equal(formatSchedule(DEFAULT_CONFIG), "Mon–Fri · 6:00 AM–8:00 AM");
+test("recent conversation index retains only valid classified entries", () => {
+  const normalized = normalizeConfig({
+    ...DEFAULT_CONFIG,
+    targeting: {
+      ...DEFAULT_CONFIG.targeting,
+      indexedChats: [
+        { id: "dm/person", label: "Person", kind: "direct" },
+        { id: "space/group", label: "Group", kind: "group-direct" },
+        { id: "space/project", label: "Project", kind: "space" },
+        { id: "space/unknown", label: "Unknown", kind: "unsupported" },
+      ],
+    },
+  });
+  assert.deepEqual(
+    normalized.targeting.indexedChats.map((item) => item.kind),
+    ["direct", "group-direct", "space"],
+  );
+});
+
+test("schedule summary uses 24-hour times", () => {
+  assert.equal(formatSchedule(DEFAULT_CONFIG), "Mon–Fri · 06:00–08:00");
   assert.equal(formatSchedule({
     ...DEFAULT_CONFIG,
     schedule: {
@@ -170,5 +189,5 @@ test("schedule summary uses human-readable times", () => {
         { start: "16:00", end: "18:00" },
       ],
     },
-  }), "Mon–Fri · 6:00 AM–8:00 AM · 4:00 PM–6:00 PM");
+  }), "Mon–Fri · 06:00–08:00 · 16:00–18:00");
 });

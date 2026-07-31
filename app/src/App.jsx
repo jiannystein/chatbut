@@ -58,6 +58,7 @@ import {
   loadLocalConfig,
   saveLocalConfig,
 } from "./file-store.js";
+import { fuzzyScore, normalizeConversationLabel } from "./bookmarklet/core.js";
 
 const GOOGLE_CHAT_URL = "https://chat.google.com/app/home";
 const PAIRING_TOKEN_KEY = "chatbut-pairing-token";
@@ -194,7 +195,7 @@ function BookmarkletLink({ href, disabled = false }) {
       draggable={disabled ? "false" : "true"}
       title={disabled ? "Create or import a configuration first" : "Drag this button to the Chrome bookmarks bar"}
     >
-      <BookmarkSimple size={20} weight="bold" aria-hidden="true" />
+      <span aria-hidden="true">💬</span>
       <span>Chatbut</span>
     </a>
   );
@@ -348,39 +349,84 @@ function Timeline({ schedule }) {
   );
 }
 
-function OverlayPreview({
-  active,
-  canEnable,
-  onEnable,
-  onStop,
-  nextWindow,
-  scheduleLabel,
-}) {
+function ScheduleTimeInput({ id, label, value, onCommit }) {
+  const [draft, setDraft] = useState(value);
+  const [touched, setTouched] = useState(false);
+  const valid = /^([01]\d|2[0-3]):[0-5]\d$/.test(draft);
+  const descriptionId = `${id}-description`;
+
+  useEffect(() => {
+    setDraft(value);
+    setTouched(false);
+  }, [value]);
+
+  function commit() {
+    setTouched(true);
+    if (!valid) return;
+    onCommit(draft);
+    setTouched(false);
+  }
+
   return (
-    <aside className="overlay-frame" aria-label="Google Chat overlay preview">
-      <span className="overlay-frame__label">Google Chat overlay preview</span>
-      <div className={`overlay-panel${active ? " is-enabled" : ""}`}>
-        <img src="./assets/chatbut-mark.png" alt="" width="72" height="72" />
-        <h2>{active ? "Chatbut is active" : "Outside your window"}</h2>
-        <p>
-          <CalendarBlank size={18} weight="bold" aria-hidden="true" />
-          {active ? scheduleLabel : nextWindow}
-        </p>
+    <label className="schedule-time-field" htmlFor={id}>
+      <span>{label}</span>
+      <input
+        id={id}
+        type="text"
+        inputMode="numeric"
+        autoComplete="off"
+        spellCheck="false"
+        maxLength="5"
+        pattern="([01]\d|2[0-3]):[0-5]\d"
+        value={draft}
+        aria-invalid={touched && !valid}
+        aria-describedby={descriptionId}
+        placeholder="HH:MM"
+        onChange={(event) => {
+          setDraft(event.target.value.replace(/[^\d:]/g, "").slice(0, 5));
+          if (touched) setTouched(false);
+        }}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") {
+            setDraft(value);
+            setTouched(false);
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <small id={descriptionId}>
+        {touched && !valid ? "Use 24-hour time, for example 18:30." : "24-hour time · HH:MM"}
+      </small>
+    </label>
+  );
+}
+
+function OverlayPreview({ nextWindow, scheduleLabel, withinSchedule }) {
+  return (
+    <aside className="overlay-frame" aria-label="Google Chat widget preview">
+      <div className="overlay-frame__heading">
+        <span className="overlay-frame__label">Google Chat widget</span>
+        <span className="preview-badge">Preview only</span>
+      </div>
+      <div className="overlay-panel" aria-disabled="true">
+        <div className="overlay-panel__header">
+          <strong>Chatbut</strong>
+          <span>Disabled</span>
+        </div>
+        <p className="overlay-panel__status">Ready in the dedicated automation tab.</p>
+        <dl className="overlay-metrics">
+          <div><dt>Replies</dt><dd>0</dd></div>
+          <div><dt>Chats</dt><dd>0</dd></div>
+          <div><dt>Pending</dt><dd>0</dd></div>
+        </dl>
         <div className="overlay-panel__actions">
-          <Button
-            tone="support"
-            icon={Play}
-            onClick={onEnable}
-            disabled={!canEnable || active}
-          >
-            Enable
-          </Button>
-          <Button tone="danger" icon={Stop} onClick={onStop} disabled={!active}>
-            Stop
-          </Button>
+          <Button tone="support" icon={Play} disabled>Enable</Button>
+          <Button tone="danger" icon={Stop} disabled>Stop</Button>
         </div>
         <span className="overlay-panel__reassurance">
-          {active ? "Monitoring only new eligible messages." : "Auto-ack is disabled right now. You’re in control."}
+          {withinSchedule ? scheduleLabel : nextWindow} · Session safety limit 20
         </span>
       </div>
     </aside>
@@ -391,11 +437,7 @@ function WindowPanel({
   config,
   setConfig,
   setActiveSection,
-  canEnable,
-  enabled,
-  setEnabled,
   configured,
-  setMessage,
   bookmarkletHref,
   onOpenGoogleChat,
 }) {
@@ -424,34 +466,6 @@ function WindowPanel({
     }));
   }
 
-  function handleEnable() {
-    if (!configured) {
-      setMessage({ tone: "warning", text: "Create or import a local configuration before enabling." });
-      return;
-    }
-    const validation = validateConfig(config);
-    if (!validation.valid) {
-      setMessage({ tone: "warning", text: validation.errors.join(" ") });
-      return;
-    }
-    if (!activeNow) {
-      const confirmed = window.confirm(
-        "You are outside the configured schedule. Enable this preview anyway until you stop it or reload?",
-      );
-      if (!confirmed) {
-        setMessage({ tone: "warning", text: "Preview stayed disabled. Review the response windows, then retry." });
-        return;
-      }
-    }
-    setEnabled(true);
-    setMessage({
-      tone: "info",
-      text: activeNow
-        ? "Preview enabled inside the current response window."
-        : "Preview enabled with a manual schedule override for this page session.",
-    });
-  }
-
   return (
     <section className="workspace workspace--window" aria-labelledby="window-heading">
       <div className="window-main">
@@ -471,7 +485,7 @@ function WindowPanel({
           </span>
           <div className="install-strip__copy">
             <strong id="install-heading">Install once, click in Chat</strong>
-            <span>Drag Chatbut once into bookmarks, then click the bookmark while on the Google Chat page.</span>
+            <span>Drag 💬 Chatbut to the Chrome bookmarks bar. Open Google Chat, then click it to start a dedicated automation tab.</span>
           </div>
           <div className="install-strip__actions">
             {bookmarkletHref ? (
@@ -516,22 +530,18 @@ function WindowPanel({
               <div className="schedule-windows">
                 {config.schedule.windows.map((window, index) => (
                   <div className="time-fields time-fields--window" key={`${window.start}-${window.end}-${index}`}>
-                    <label>
-                      <span>Window {index + 1} start</span>
-                      <input
-                        type="time"
-                        value={window.start}
-                        onChange={(event) => updateWindow(index, "start", event.target.value)}
-                      />
-                    </label>
-                    <label>
-                      <span>Window {index + 1} end</span>
-                      <input
-                        type="time"
-                        value={window.end}
-                        onChange={(event) => updateWindow(index, "end", event.target.value)}
-                      />
-                    </label>
+                    <ScheduleTimeInput
+                      id={`window-${index + 1}-start`}
+                      label={`Window ${index + 1} start`}
+                      value={window.start}
+                      onCommit={(value) => updateWindow(index, "start", value)}
+                    />
+                    <ScheduleTimeInput
+                      id={`window-${index + 1}-end`}
+                      label={`Window ${index + 1} end`}
+                      value={window.end}
+                      onCommit={(value) => updateWindow(index, "end", value)}
+                    />
                     <button
                       type="button"
                       className="icon-button icon-button--danger"
@@ -559,12 +569,12 @@ function WindowPanel({
           <FieldRow
             Icon={User}
             label="Direct messages"
-            value={`Everyone except ${config.targeting.directExclusions.length} ${config.targeting.directExclusions.length === 1 ? "person" : "people"}`}
+            value={`${config.targeting.directExclusions.length} excluded · group DMs need a mention`}
             onClick={() => setActiveSection("people")}
           />
           <FieldRow
             Icon={Hash}
-            label="Group mentions"
+            label="Spaces"
             value={`${config.targeting.selectedGroups.length} selected ${config.targeting.selectedGroups.length === 1 ? "space" : "spaces"}`}
             onClick={() => setActiveSection("people")}
           />
@@ -615,112 +625,182 @@ function WindowPanel({
       </div>
 
       <OverlayPreview
-        active={enabled}
-        canEnable={canEnable}
-        onEnable={handleEnable}
-        onStop={() => {
-          setEnabled(false);
-          setMessage({ tone: "info", text: "Preview stopped immediately." });
-        }}
         nextWindow={nextWindowLabel(config)}
         scheduleLabel={scheduleLabel}
+        withinSchedule={activeNow}
       />
     </section>
   );
 }
 
-function SearchTargets({ title, description, items, onRemove, emptyCopy }) {
+const TARGET_KIND_COPY = {
+  direct: { label: "1:1 direct", Icon: User },
+  "group-direct": { label: "Group DM", Icon: UsersThree },
+  space: { label: "Space", Icon: Hash },
+};
+
+function inferredTargetKind(item, source) {
+  if (item.kind) return item.kind;
+  if (source === "space") return "space";
+  return item.id.startsWith("dm/") ? "direct" : "group-direct";
+}
+
+function TargetManager({ config, setConfig }) {
   const [query, setQuery] = useState("");
-  const filtered = items.filter((item) => item.label.toLowerCase().includes(query.toLowerCase()));
+  const indexed = config.targeting.indexedChats;
+  const merged = useMemo(() => {
+    const byId = new Map(indexed.map((item) => [item.id, item]));
+    for (const item of config.targeting.directExclusions) {
+      if (!byId.has(item.id)) byId.set(item.id, { ...item, kind: inferredTargetKind(item, "direct") });
+    }
+    for (const item of config.targeting.selectedGroups) {
+      if (!byId.has(item.id)) byId.set(item.id, { ...item, kind: inferredTargetKind(item, "space") });
+    }
+    return [...byId.values()];
+  }, [config.targeting.directExclusions, config.targeting.indexedChats, config.targeting.selectedGroups]);
+  const directExclusions = new Set(config.targeting.directExclusions.map((item) => item.id));
+  const selectedGroups = new Set(config.targeting.selectedGroups.map((item) => item.id));
+  const normalizedQuery = query.trim();
+  const results = merged
+    .map((item, index) => ({
+      ...item,
+      label: normalizeConversationLabel(item.label),
+      customized: item.kind === "space" ? selectedGroups.has(item.id) : directExclusions.has(item.id),
+      score: fuzzyScore(normalizedQuery, item.label),
+      index,
+    }))
+    .filter((item) => item.score > 0)
+    .sort((a, b) => {
+      if (!normalizedQuery && a.customized !== b.customized) return a.customized ? -1 : 1;
+      return b.score - a.score || a.index - b.index;
+    })
+    .slice(0, 12);
+
+  function toggle(item) {
+    setConfig((current) => {
+      const listName = item.kind === "space" ? "selectedGroups" : "directExclusions";
+      const list = current.targeting[listName];
+      const exists = list.some((entry) => entry.id === item.id);
+      return {
+        ...current,
+        targeting: {
+          ...current.targeting,
+          [listName]: exists
+            ? list.filter((entry) => entry.id !== item.id)
+            : [...list, { id: item.id, label: item.label, kind: item.kind }],
+        },
+      };
+    });
+  }
+
   return (
-    <section className="editor-section">
+    <section className="target-manager" aria-labelledby="target-manager-heading">
       <div className="editor-section__heading">
         <div>
-          <h2>{title}</h2>
-          <p>{description}</p>
+          <h2 id="target-manager-heading">Recent Google Chat conversations</h2>
+          <p>Search the locally indexed list, then change only the exceptions.</p>
         </div>
-        <span className="count-badge">{items.length}</span>
+        <span className="count-badge">{indexed.length}</span>
       </div>
       <label className="search-field">
-        <span>Filter saved chats</span>
+        <span>Find a conversation</span>
         <span className="input-shell">
           <MagnifyingGlass size={20} weight="regular" aria-hidden="true" />
           <input
             type="search"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search by chat name"
+            placeholder="Search recent chats and spaces"
           />
         </span>
       </label>
-      {filtered.length ? (
-        <ul className="target-list">
-          {filtered.map((item) => (
-            <li key={item.id}>
-              <span>{item.label}</span>
-              <button type="button" onClick={() => onRemove(item.id)} aria-label={`Remove ${item.label}`}>
-                <X size={20} weight="bold" aria-hidden="true" />
-              </button>
-            </li>
-          ))}
+      <p className="search-results-count" aria-live="polite">
+        {results.length} {results.length === 1 ? "conversation" : "conversations"} shown
+      </p>
+      {results.length ? (
+        <ul className="conversation-list">
+          {results.map((item) => {
+            const kind = TARGET_KIND_COPY[item.kind] ?? TARGET_KIND_COPY.direct;
+            const excluded = directExclusions.has(item.id);
+            const selected = selectedGroups.has(item.id);
+            const state = item.kind === "space"
+              ? selected ? "Included" : "Off"
+              : excluded
+                ? "Excluded"
+                : item.kind === "group-direct" ? "Mentions and replies" : "Auto reply";
+            const action = item.kind === "space"
+              ? selected ? "Remove" : "Include"
+              : excluded ? "Allow" : "Exclude";
+            const Icon = kind.Icon;
+            return (
+              <li key={item.id}>
+                <span className="conversation-list__icon">
+                  <Icon size={20} weight="regular" aria-hidden="true" />
+                </span>
+                <span className="conversation-list__copy">
+                  <strong>{item.label}</strong>
+                  <span>{kind.label} · {state}</span>
+                </span>
+                <button type="button" onClick={() => toggle(item)}>
+                  {action}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <div className="empty-state">
-          <List size={32} weight="regular" aria-hidden="true" />
-          <strong>{query ? "No saved chats match" : emptyCopy}</strong>
-          <span>Add current chats from the injected Google Chat overlay.</span>
+          <MagnifyingGlass size={32} weight="regular" aria-hidden="true" />
+          <strong>{normalizedQuery ? "No recent chats match" : "No conversations indexed yet"}</strong>
+          <span>
+            {normalizedQuery
+              ? "Try a shorter name."
+              : "Run 💬 Chatbut once in Google Chat. Recent conversations will appear here automatically."}
+          </span>
         </div>
       )}
     </section>
   );
 }
 
+function PolicySummary({ config }) {
+  const directCount = config.targeting.directExclusions.filter(
+    (item) => inferredTargetKind(item, "direct") === "direct",
+  ).length;
+  const groupCount = config.targeting.directExclusions.filter(
+    (item) => inferredTargetKind(item, "direct") === "group-direct",
+  ).length;
+  return (
+    <div className="policy-band">
+      <div>
+        <User size={24} weight="regular" aria-hidden="true" />
+        <span><strong>1:1 direct messages</strong>Auto reply · {directCount} excluded</span>
+      </div>
+      <div>
+        <UsersThree size={24} weight="regular" aria-hidden="true" />
+        <span><strong>Multi-person DMs</strong>Mentions and replies · {groupCount} excluded</span>
+      </div>
+      <div>
+        <Hash size={24} weight="regular" aria-hidden="true" />
+        <span><strong>Spaces</strong>Opt-in · {config.targeting.selectedGroups.length} selected</span>
+      </div>
+    </div>
+  );
+}
+
 function PeoplePanel({ config, setConfig }) {
-  function removeTarget(key, id) {
-    setConfig((current) => ({
-      ...current,
-      targeting: {
-        ...current.targeting,
-        [key]: current.targeting[key].filter((item) => item.id !== id),
-      },
-    }));
-  }
   return (
     <section className="workspace workspace--editor" aria-labelledby="people-heading">
       <div className="section-heading section-heading--wide">
         <div>
           <h1 id="people-heading">Choose who receives replies</h1>
-          <p>Direct messages use an exclusion list. Group spaces require an explicit selection and an @mention or direct reply.</p>
+          <p>Chatbut handles normal direct messages automatically. Group conversations respond only when you are mentioned or directly replied to.</p>
         </div>
       </div>
-      <div className="policy-band">
-        <div>
-          <User size={24} weight="regular" aria-hidden="true" />
-          <span><strong>Direct messages</strong>Everyone except exclusions</span>
-        </div>
-        <div>
-          <Hash size={24} weight="regular" aria-hidden="true" />
-          <span><strong>Group spaces</strong>Selected spaces only</span>
-        </div>
-      </div>
-      <div className="editor-grid">
-        <SearchTargets
-          title="Direct-message exclusions"
-          description="Chatbut skips these people."
-          items={config.targeting.directExclusions}
-          onRemove={(id) => removeTarget("directExclusions", id)}
-          emptyCopy="No one is excluded"
-        />
-        <SearchTargets
-          title="Selected group spaces"
-          description="Only @mentions and direct replies in these spaces qualify."
-          items={config.targeting.selectedGroups}
-          onRemove={(id) => removeTarget("selectedGroups", id)}
-          emptyCopy="No group spaces selected"
-        />
-      </div>
+      <PolicySummary config={config} />
+      <TargetManager config={config} setConfig={setConfig} />
       <InlineNotice>
-        Recent chats are indexed only after you run Chatbut on Google Chat. Search there, then add a conversation to this configuration file.
+        The recent-chat index contains conversation names and stable IDs only. It is refreshed locally when the bookmark connects.
       </InlineNotice>
     </section>
   );
@@ -1209,7 +1289,6 @@ export function App() {
   const [configured, setConfigured] = useState(false);
   const [storageLoading, setStorageLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState("idle");
-  const [enabled, setEnabled] = useState(false);
   const [message, setMessage] = useState(null);
   const [bookmarkletHref, setBookmarkletHref] = useState("");
   const [pairingToken] = useState(getOrCreatePairingToken);
@@ -1220,14 +1299,11 @@ export function App() {
   configRef.current = config;
 
   const validation = useMemo(() => validateConfig(config), [config]);
-  const canEnable = Boolean(configured && validation.valid);
-
   function setConfig(updater) {
     setConfigState((current) => {
       const next = typeof updater === "function" ? updater(current) : updater;
       return normalizeConfig(next);
     });
-    setEnabled(false);
   }
 
   useEffect(() => {
@@ -1384,7 +1460,6 @@ export function App() {
       await createLocalConfig(nextConfig, pairingToken);
       setConfigState(nextConfig);
       setConfigured(true);
-      setEnabled(false);
       setSaveStatus("saved");
       setMessage({ tone: "info", text: "Created the browser-local configuration. Review the settings, then install the bookmark." });
       setActiveSection("window");
@@ -1402,7 +1477,6 @@ export function App() {
       const record = await importConfigFile(file, pairingToken);
       setConfigState(record.config);
       setConfigured(true);
-      setEnabled(false);
       setSaveStatus("saved");
       setMessage({
         tone: "info",
@@ -1499,11 +1573,7 @@ export function App() {
             config={config}
             setConfig={setConfig}
             setActiveSection={setActiveSection}
-            canEnable={canEnable}
-            enabled={enabled}
-            setEnabled={setEnabled}
             configured={configured}
-            setMessage={setMessage}
             bookmarkletHref={bookmarkletHref}
             onOpenGoogleChat={handleOpenGoogleChat}
           />

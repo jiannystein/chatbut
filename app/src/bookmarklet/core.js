@@ -1,6 +1,7 @@
 export const SESSION_REPLY_LIMIT = 20;
 export const ROLLING_REPLY_LIMIT = 5;
 export const ROLLING_REPLY_WINDOW_MS = 5 * 60 * 1000;
+export const CONVERSATION_KINDS = ["direct", "group-direct", "space"];
 
 export function randomDelayMs(minimumSeconds, maximumSeconds, random = Math.random) {
   const minimum = Math.max(1, Math.round(Number(minimumSeconds) || 1));
@@ -18,11 +19,54 @@ export function isTargetAllowed(config, conversation) {
   if (conversation.kind === "direct") {
     return !config.targeting.directExclusions.some((item) => item.id === conversation.id);
   }
+  if (conversation.kind === "group-direct") {
+    return !config.targeting.directExclusions.some((item) => item.id === conversation.id)
+      && Boolean(conversation.mentionedSelf || conversation.repliedToSelf);
+  }
   if (conversation.kind === "space") {
     return config.targeting.selectedGroups.some((item) => item.id === conversation.id)
       && Boolean(conversation.mentionedSelf || conversation.repliedToSelf);
   }
   return false;
+}
+
+export function mayInspectConversation(config, conversation) {
+  if (!conversation?.id) return false;
+  if (conversation.kind === "direct" || conversation.kind === "group-direct") {
+    return !config.targeting.directExclusions.some((item) => item.id === conversation.id);
+  }
+  if (conversation.kind === "space") {
+    return config.targeting.selectedGroups.some((item) => item.id === conversation.id);
+  }
+  return false;
+}
+
+export function classifyConversation(id, section) {
+  const value = String(id ?? "");
+  if (section === "direct") {
+    if (value.startsWith("dm/")) return "direct";
+    if (value.startsWith("space/")) return "group-direct";
+  }
+  if (section === "space" && value.startsWith("space/")) return "space";
+  return "unknown";
+}
+
+export function normalizeConversationLabel(value, fallback = "Saved chat") {
+  const label = String(value ?? "")
+    .replace(/\s*Press tab for more options\.?\s*$/i, "")
+    .replace(/\s*Open in a pop-up\s*$/i, "")
+    .replace(/^\s*Options\s*$/i, "")
+    .replace(/\s+Conversation\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return label || fallback;
+}
+
+export function mentionTargetsSelf(mentionEmails, selfEmail) {
+  const identity = String(selfEmail ?? "").trim().toLowerCase();
+  if (!identity) return false;
+  return (Array.isArray(mentionEmails) ? mentionEmails : [])
+    .some((email) => String(email ?? "").trim().toLowerCase() === identity);
 }
 
 export function selectVault(state, now, followUpMinutes) {
