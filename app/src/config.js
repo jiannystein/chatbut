@@ -8,12 +8,21 @@ export const DAY_OPTIONS = [
   { value: 0, short: "Sun", label: "Sunday" },
 ];
 
+export const PROVIDER_IDS = [
+  "deepseek",
+  "openai",
+  "anthropic",
+  "kimi-global",
+  "kimi-china",
+];
+
+export const MAX_SCHEDULE_WINDOWS = 8;
+
 export const DEFAULT_CONFIG = Object.freeze({
-  version: 1,
+  version: 2,
   schedule: {
     days: [1, 2, 3, 4, 5],
-    start: "06:00",
-    end: "08:00",
+    windows: [{ start: "06:00", end: "08:00" }],
     timezone: "browser",
   },
   delays: {
@@ -42,11 +51,10 @@ export const DEFAULT_CONFIG = Object.freeze({
       "Sorry for the wait — I still need a little more time and will follow up soon.",
     ],
   },
-  ai: {
-    provider: "deepseek",
+  llm: {
     enabled: false,
-    apiKey: "",
-    model: "deepseek-v4-flash",
+    activeProviderId: "",
+    connections: [],
     recentMessageCount: 5,
     language: "en",
     tone: "casual-empathetic-corporate",
@@ -95,6 +103,80 @@ function cleanTime(value, fallback) {
     : fallback;
 }
 
+function cleanScheduleWindows(schedule, fallback) {
+  const sourceWindows = Array.isArray(schedule.windows)
+    ? schedule.windows
+    : schedule.start || schedule.end
+      ? [{ start: schedule.start, end: schedule.end }]
+      : fallback.schedule.windows;
+  const seen = new Set();
+  return sourceWindows
+    .filter((window) => window && typeof window === "object")
+    .map((window) => ({
+      start: cleanTime(window.start, "06:00"),
+      end: cleanTime(window.end, "08:00"),
+    }))
+    .filter((window) => {
+      const key = `${window.start}-${window.end}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_SCHEDULE_WINDOWS)
+    .sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+}
+
+function cleanConnection(item) {
+  if (!item || typeof item !== "object") return null;
+  const providerId = String(item.providerId ?? "");
+  if (!PROVIDER_IDS.includes(providerId)) return null;
+  const apiKey = typeof item.apiKey === "string" ? item.apiKey.trim() : "";
+  const model = typeof item.model === "string" ? item.model.trim() : "";
+  if (!apiKey) return null;
+  return {
+    providerId,
+    apiKey,
+    model,
+    status: item.status === "validated" ? "validated" : "needs-attention",
+    validatedAt: typeof item.validatedAt === "string" ? item.validatedAt : "",
+    error: typeof item.error === "string" ? item.error.slice(0, 240) : "",
+  };
+}
+
+function cleanConnections(value) {
+  if (!Array.isArray(value)) return [];
+  const providers = new Set();
+  return value
+    .map(cleanConnection)
+    .filter((connection) => {
+      if (!connection || providers.has(connection.providerId)) return false;
+      providers.add(connection.providerId);
+      return true;
+    })
+    .slice(0, PROVIDER_IDS.length);
+}
+
+function migrateLegacyAi(source) {
+  const ai = source.ai && typeof source.ai === "object" ? source.ai : {};
+  const apiKey = typeof ai.apiKey === "string" ? ai.apiKey.trim() : "";
+  return {
+    enabled: Boolean(ai.enabled),
+    activeProviderId: apiKey ? "deepseek" : "",
+    connections: apiKey
+      ? [{
+        providerId: "deepseek",
+        apiKey,
+        model: typeof ai.model === "string" ? ai.model : "deepseek-v4-flash",
+        status: "needs-attention",
+        validatedAt: "",
+        error: "Validate this migrated connection before enabling.",
+      }]
+      : [],
+    recentMessageCount: ai.recentMessageCount,
+    language: ai.language,
+  };
+}
+
 export function normalizeConfig(input = {}) {
   const fallback = cloneDefault();
   const source = input && typeof input === "object" ? input : {};
@@ -103,7 +185,7 @@ export function normalizeConfig(input = {}) {
   const targeting = source.targeting && typeof source.targeting === "object" ? source.targeting : {};
   const responses = source.responses && typeof source.responses === "object" ? source.responses : {};
   const invitations = source.invitations && typeof source.invitations === "object" ? source.invitations : {};
-  const ai = source.ai && typeof source.ai === "object" ? source.ai : {};
+  const llm = source.llm && typeof source.llm === "object" ? source.llm : migrateLegacyAi(source);
   const debug = source.debug && typeof source.debug === "object" ? source.debug : {};
 
   const days = Array.isArray(schedule.days)
@@ -116,13 +198,17 @@ export function normalizeConfig(input = {}) {
   const maximumSeconds = Math.round(
     clampNumber(delays.maximumSeconds, minimumSeconds, 3_600, fallback.delays.maximumSeconds),
   );
+  const connections = cleanConnections(llm.connections);
+  const requestedActive = PROVIDER_IDS.includes(llm.activeProviderId) ? llm.activeProviderId : "";
+  const activeProviderId = connections.some((item) => item.providerId === requestedActive)
+    ? requestedActive
+    : connections[0]?.providerId ?? "";
 
   return {
-    version: 1,
+    version: 2,
     schedule: {
       days,
-      start: cleanTime(schedule.start, fallback.schedule.start),
-      end: cleanTime(schedule.end, fallback.schedule.end),
+      windows: cleanScheduleWindows(schedule, fallback),
       timezone: "browser",
     },
     delays: {
@@ -146,15 +232,14 @@ export function normalizeConfig(input = {}) {
       vault1: cleanStringList(responses.vault1, 50),
       vault2: cleanStringList(responses.vault2, 50),
     },
-    ai: {
-      provider: "deepseek",
-      enabled: Boolean(ai.enabled),
-      apiKey: typeof ai.apiKey === "string" ? ai.apiKey.trim() : "",
-      model: "deepseek-v4-flash",
+    llm: {
+      enabled: Boolean(llm.enabled),
+      activeProviderId,
+      connections,
       recentMessageCount: Math.round(
-        clampNumber(ai.recentMessageCount, 3, 10, fallback.ai.recentMessageCount),
+        clampNumber(llm.recentMessageCount, 3, 10, fallback.llm.recentMessageCount),
       ),
-      language: ai.language === "zh" ? "zh" : "en",
+      language: llm.language === "zh" ? "zh" : "en",
       tone: "casual-empathetic-corporate",
       maxSentences: 2,
     },
@@ -170,27 +255,66 @@ function minutesFromTime(value) {
   return hours * 60 + minutes;
 }
 
-export function isScheduleActive(config, date = new Date()) {
-  const normalized = normalizeConfig(config);
+function windowIsActive(window, selectedDays, date) {
   const current = date.getHours() * 60 + date.getMinutes();
-  const start = minutesFromTime(normalized.schedule.start);
-  const end = minutesFromTime(normalized.schedule.end);
-  const todaySelected = normalized.schedule.days.includes(date.getDay());
+  const start = minutesFromTime(window.start);
+  const end = minutesFromTime(window.end);
+  const todaySelected = selectedDays.includes(date.getDay());
   if (start === end) return todaySelected;
   if (start < end) return todaySelected && current >= start && current < end;
   if (todaySelected && current >= start) return true;
   const previousDay = (date.getDay() + 6) % 7;
-  return normalized.schedule.days.includes(previousDay) && current < end;
+  return selectedDays.includes(previousDay) && current < end;
+}
+
+export function isScheduleActive(config, date = new Date()) {
+  const normalized = normalizeConfig(config);
+  return normalized.schedule.windows.some((window) => (
+    windowIsActive(window, normalized.schedule.days, date)
+  ));
+}
+
+function segmentsForWindow(window) {
+  const start = minutesFromTime(window.start);
+  const end = minutesFromTime(window.end);
+  if (start === end) return [[0, 1_440]];
+  if (start < end) return [[start, end]];
+  return [[start, 1_440], [0, end]];
+}
+
+export function hasOverlappingWindows(windows) {
+  const segments = windows.flatMap((window, windowIndex) => (
+    segmentsForWindow(window).map(([start, end]) => ({ start, end, windowIndex }))
+  ));
+  return segments.some((segment, index) => segments.slice(index + 1).some((candidate) => (
+    segment.windowIndex !== candidate.windowIndex
+    && Math.max(segment.start, candidate.start) < Math.min(segment.end, candidate.end)
+  )));
+}
+
+export function activeLlmConnection(config) {
+  const normalized = normalizeConfig(config);
+  return normalized.llm.connections.find(
+    (connection) => connection.providerId === normalized.llm.activeProviderId,
+  ) ?? null;
 }
 
 export function validateConfig(config) {
   const normalized = normalizeConfig(config);
   const errors = [];
   if (normalized.schedule.days.length === 0) errors.push("Select at least one scheduled day.");
+  if (normalized.schedule.windows.length === 0) errors.push("Add at least one response window.");
+  if (hasOverlappingWindows(normalized.schedule.windows)) {
+    errors.push("Response windows cannot overlap.");
+  }
   if (normalized.responses.vault1.length === 0) errors.push("Vault 1 needs at least one response.");
   if (normalized.responses.vault2.length === 0) errors.push("Vault 2 needs at least one response.");
-  if (normalized.ai.enabled && !normalized.ai.apiKey) {
-    errors.push("Add a DeepSeek API key or turn off AI adaptation.");
+  if (normalized.llm.enabled) {
+    const connection = activeLlmConnection(normalized);
+    if (!connection) errors.push("Choose an active LLM connection or turn off LLM adaptation.");
+    else if (connection.status !== "validated" || !connection.model) {
+      errors.push("Validate the active LLM connection before enabling.");
+    }
   }
   return { valid: errors.length === 0, errors, config: normalized };
 }
@@ -212,21 +336,50 @@ export function formatDayRange(days) {
 
 export function formatSchedule(config) {
   const normalized = normalizeConfig(config);
-  return `${formatDayRange(normalized.schedule.days)} · ${formatClock(normalized.schedule.start)}–${formatClock(normalized.schedule.end)}`;
+  const windows = normalized.schedule.windows
+    .map((window) => `${formatClock(window.start)}–${formatClock(window.end)}`)
+    .join(" · ");
+  return `${formatDayRange(normalized.schedule.days)} · ${windows || "No windows"}`;
 }
 
 export function nextWindowLabel(config, now = new Date()) {
   const normalized = normalizeConfig(config);
+  const candidates = [];
   for (let offset = 0; offset <= 7; offset += 1) {
-    const candidate = new Date(now);
-    candidate.setDate(now.getDate() + offset);
-    candidate.setHours(0, 0, 0, 0);
-    if (!normalized.schedule.days.includes(candidate.getDay())) continue;
-    const [hours, minutes] = normalized.schedule.start.split(":").map(Number);
-    candidate.setHours(hours, minutes, 0, 0);
-    if (candidate <= now) continue;
-    const dayLabel = offset === 0 ? "today" : offset === 1 ? "tomorrow" : DAY_OPTIONS.find((day) => day.value === candidate.getDay())?.label;
-    return `Starts ${dayLabel} at ${formatClock(normalized.schedule.start)}`;
+    const day = new Date(now);
+    day.setDate(now.getDate() + offset);
+    day.setHours(0, 0, 0, 0);
+    if (!normalized.schedule.days.includes(day.getDay())) continue;
+    for (const window of normalized.schedule.windows) {
+      const candidate = new Date(day);
+      const [hours, minutes] = window.start.split(":").map(Number);
+      candidate.setHours(hours, minutes, 0, 0);
+      if (candidate > now) candidates.push({ candidate, offset, start: window.start });
+    }
   }
-  return "Review your schedule";
+  candidates.sort((a, b) => a.candidate - b.candidate);
+  const next = candidates[0];
+  if (!next) return "Review your schedule";
+  const dayLabel = next.offset === 0
+    ? "today"
+    : next.offset === 1
+      ? "tomorrow"
+      : DAY_OPTIONS.find((day) => day.value === next.candidate.getDay())?.label;
+  return `Starts ${dayLabel} at ${formatClock(next.start)}`;
+}
+
+export function markImportedConnectionsForValidation(config) {
+  const normalized = normalizeConfig(config);
+  return {
+    ...normalized,
+    llm: {
+      ...normalized.llm,
+      connections: normalized.llm.connections.map((connection) => ({
+        ...connection,
+        status: "needs-attention",
+        validatedAt: "",
+        error: "Validate this imported connection in this browser.",
+      })),
+    },
+  };
 }

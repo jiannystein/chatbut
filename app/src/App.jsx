@@ -9,11 +9,11 @@ import {
   ChatsCircle,
   CheckCircle,
   Clock,
+  Database,
+  DownloadSimple,
   Eye,
   EyeSlash,
-  FileText,
-  FloppyDisk,
-  FolderOpen,
+  FileArrowUp,
   Globe,
   Hash,
   HourglassMedium,
@@ -39,6 +39,7 @@ import "@fontsource-variable/manrope";
 import {
   DAY_OPTIONS,
   DEFAULT_CONFIG,
+  MAX_SCHEDULE_WINDOWS,
   formatClock,
   formatDayRange,
   formatSchedule,
@@ -48,23 +49,27 @@ import {
   validateConfig,
 } from "./config.js";
 import {
-  appendDebugLog,
-  chooseDebugFolder,
-  createConfigFile,
-  forgetRememberedConfigHandle,
-  getRememberedConfigHandle,
-  openConfigFile,
-  readConfigHandle,
-  requestConfigHandlePermission,
-  writeConfigFile,
+  clearDebugLog,
+  createLocalConfig,
+  exportConfigFile,
+  exportDebugLog,
+  getDebugLogStatus,
+  importConfigFile,
+  loadLocalConfig,
+  saveLocalConfig,
 } from "./file-store.js";
-import { validateDeepSeekKey } from "./deepseek.js";
-import { redactLogValue } from "./bookmarklet/core.js";
 
 const GOOGLE_CHAT_URL = "https://chat.google.com/app/home";
 const PAIRING_TOKEN_KEY = "chatbut-pairing-token";
 const PAIRING_TOKEN_PLACEHOLDER = "__CHATBUT_PAIRING_TOKEN__";
 const BRIDGE_URL_PLACEHOLDER = "__CHATBUT_BRIDGE_URL__";
+const PROVIDERS = [
+  { id: "deepseek", label: "DeepSeek", hint: "Default" },
+  { id: "openai", label: "OpenAI", hint: "OpenAI API" },
+  { id: "anthropic", label: "Claude", hint: "Anthropic API" },
+  { id: "kimi-global", label: "Kimi Global", hint: "moonshot.ai" },
+  { id: "kimi-china", label: "Kimi China", hint: "moonshot.cn" },
+];
 
 const NAV_ITEMS = [
   { id: "window", label: "Window", Icon: Clock },
@@ -165,7 +170,7 @@ function InfoTip({ children }) {
   );
 }
 
-function BookmarkletLink({ href }) {
+function BookmarkletLink({ href, disabled = false }) {
   const anchorRef = useRef(null);
   useEffect(() => {
     anchorRef.current?.setAttribute("href", href);
@@ -173,15 +178,21 @@ function BookmarkletLink({ href }) {
   return (
     <a
       ref={anchorRef}
-      className="button button--primary install-strip__button"
+      className={`button button--primary install-strip__button${disabled ? " is-disabled" : ""}`}
       href="#install-chatbut"
+      aria-disabled={disabled}
+      tabIndex={disabled ? -1 : 0}
       onClick={(event) => event.preventDefault()}
       onDragStart={(event) => {
+        if (disabled) {
+          event.preventDefault();
+          return;
+        }
         event.dataTransfer.setData("text/uri-list", href);
         event.dataTransfer.setData("text/plain", href);
       }}
-      draggable="true"
-      title="Drag this button to the Chrome bookmarks bar"
+      draggable={disabled ? "false" : "true"}
+      title={disabled ? "Create or import a configuration first" : "Drag this button to the Chrome bookmarks bar"}
     >
       <BookmarkSimple size={20} weight="bold" aria-hidden="true" />
       <span>Chatbut</span>
@@ -211,7 +222,7 @@ function FieldRow({ Icon, label, value, onClick, tone = "support" }) {
   );
 }
 
-function AppHeader({ fileName, dirty, onOpen, onCreate, onSave, saving }) {
+function AppHeader({ configured, saveStatus, onImport, onCreate, onExport }) {
   return (
     <header className="masthead">
       <div className="brand" aria-label="Chatbut">
@@ -219,23 +230,25 @@ function AppHeader({ fileName, dirty, onOpen, onCreate, onSave, saving }) {
         <span>Chatbut</span>
       </div>
       <div className="masthead__file">
-        <FileText size={20} weight="regular" aria-hidden="true" />
-        <span className={`status-dot${fileName ? "" : " status-dot--idle"}`} aria-hidden="true" />
-        <span className="masthead__filename">{fileName || "No configuration selected"}</span>
-        <span className="masthead__local">· Local</span>
-        {dirty ? <span className="dirty-badge">Unsaved</span> : null}
+        <Database size={20} weight="regular" aria-hidden="true" />
+        <span className={`status-dot${configured ? "" : " status-dot--idle"}`} aria-hidden="true" />
+        <span className="masthead__filename">
+          {configured ? "Browser-local configuration" : "No local configuration"}
+        </span>
+        <span className="masthead__local">· This Chrome profile</span>
+        {configured && saveStatus === "saving" ? <span className="dirty-badge">Saving</span> : null}
+        {configured && saveStatus === "saved" ? <span className="saved-badge">Saved</span> : null}
       </div>
       <div className="masthead__actions">
-        <Button icon={FolderOpen} onClick={onOpen}>Open</Button>
-        <Button icon={Plus} onClick={onCreate}>New</Button>
+        <Button icon={FileArrowUp} onClick={onImport}>Import</Button>
+        <Button icon={Plus} onClick={onCreate}>{configured ? "Reset" : "Create"}</Button>
         <Button
-          icon={FloppyDisk}
+          icon={DownloadSimple}
           tone="support"
-          onClick={onSave}
-          disabled={!fileName || saving}
-          loading={saving}
+          onClick={onExport}
+          disabled={!configured}
         >
-          Save
+          Export
         </Button>
       </div>
     </header>
@@ -297,27 +310,28 @@ function DaySelector({ days, onChange }) {
 }
 
 function Timeline({ schedule }) {
+  const window = schedule.windows[0] ?? { start: "06:00", end: "08:00" };
   const labels = useMemo(() => {
-    const [startHour, startMinute] = schedule.start.split(":").map(Number);
-    const [endHour, endMinute] = schedule.end.split(":").map(Number);
+    const [startHour, startMinute] = window.start.split(":").map(Number);
+    const [endHour, endMinute] = window.end.split(":").map(Number);
     const start = startHour * 60 + startMinute;
     let end = endHour * 60 + endMinute;
     if (end <= start) end += 24 * 60;
     const duration = end - start;
-    return Array.from({ length: 9 }, (_, index) => {
-      const minutes = start + Math.round((duration * index) / 8);
+    return Array.from({ length: 5 }, (_, index) => {
+      const minutes = start + Math.round((duration * index) / 4);
       const wrapped = minutes % (24 * 60);
       return {
-        position: `${(index / 8) * 100}%`,
+        position: `${(index / 4) * 100}%`,
         label: formatClock(
           `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`,
         ),
       };
     });
-  }, [schedule.end, schedule.start]);
+  }, [window.end, window.start]);
 
   return (
-    <div className="timeline" aria-label={`Scheduled from ${formatClock(schedule.start)} to ${formatClock(schedule.end)}`}>
+    <div className="timeline" aria-label={`First window from ${formatClock(window.start)} to ${formatClock(window.end)}`}>
       <div className="timeline__rail" aria-hidden="true">
         <span className="timeline__endpoint timeline__endpoint--start" />
         <span className="timeline__endpoint timeline__endpoint--end" />
@@ -380,8 +394,7 @@ function WindowPanel({
   canEnable,
   enabled,
   setEnabled,
-  fileName,
-  keyStatus,
+  configured,
   setMessage,
   bookmarkletHref,
   onOpenGoogleChat,
@@ -398,6 +411,12 @@ function WindowPanel({
     }));
   }
 
+  function updateWindow(index, key, value) {
+    updateSchedule("windows", config.schedule.windows.map((window, windowIndex) => (
+      windowIndex === index ? { ...window, [key]: value } : window
+    )));
+  }
+
   function updateDelay(key, value) {
     setConfig((current) => ({
       ...current,
@@ -406,21 +425,31 @@ function WindowPanel({
   }
 
   function handleEnable() {
-    if (!fileName) {
-      setMessage({ tone: "warning", text: "Choose or create a configuration file before enabling." });
+    if (!configured) {
+      setMessage({ tone: "warning", text: "Create or import a local configuration before enabling." });
       return;
     }
-    if (config.ai.enabled && keyStatus !== "valid") {
-      setActiveSection("replies");
-      setMessage({ tone: "warning", text: "Validate the DeepSeek key before enabling." });
+    const validation = validateConfig(config);
+    if (!validation.valid) {
+      setMessage({ tone: "warning", text: validation.errors.join(" ") });
       return;
     }
     if (!activeNow) {
-      setMessage({ tone: "warning", text: "You are outside the configured window. Review the schedule before enabling." });
-      return;
+      const confirmed = window.confirm(
+        "You are outside the configured schedule. Enable this preview anyway until you stop it or reload?",
+      );
+      if (!confirmed) {
+        setMessage({ tone: "warning", text: "Preview stayed disabled. Review the response windows, then retry." });
+        return;
+      }
     }
     setEnabled(true);
-    setMessage({ tone: "info", text: "Preview enabled. The bookmarklet will use this same safety check in Google Chat." });
+    setMessage({
+      tone: "info",
+      text: activeNow
+        ? "Preview enabled inside the current response window."
+        : "Preview enabled with a manual schedule override for this page session.",
+    });
   }
 
   return (
@@ -442,11 +471,11 @@ function WindowPanel({
           </span>
           <div className="install-strip__copy">
             <strong id="install-heading">Install once, click in Chat</strong>
-            <span>Drag Chatbut once. Keep this page open with your configuration, then click the bookmark in Google Chat.</span>
+            <span>Drag Chatbut once into bookmarks, then click the bookmark while on the Google Chat page.</span>
           </div>
           <div className="install-strip__actions">
             {bookmarkletHref ? (
-              <BookmarkletLink href={bookmarkletHref} />
+              <BookmarkletLink href={bookmarkletHref} disabled={!configured} />
             ) : (
               <span className="install-strip__loading">
                 <SpinnerGap className="spin" size={20} weight="bold" aria-hidden="true" />
@@ -457,7 +486,7 @@ function WindowPanel({
               icon={ArrowSquareOut}
               tone="support"
               onClick={onOpenGoogleChat}
-              disabled={!fileName}
+              disabled={!configured}
             >
               Open Google Chat
             </Button>
@@ -465,9 +494,9 @@ function WindowPanel({
         </section>
 
         <div className="window-clock" aria-hidden="true">
-          <strong>{formatClock(config.schedule.start)}</strong>
+          <strong>{formatClock(config.schedule.windows[0]?.start ?? "06:00")}</strong>
           <span>{formatDayRange(config.schedule.days)}</span>
-          <strong>{formatClock(config.schedule.end)}</strong>
+          <strong>{formatClock(config.schedule.windows[0]?.end ?? "08:00")}</strong>
         </div>
 
         <Timeline schedule={config.schedule} />
@@ -476,29 +505,54 @@ function WindowPanel({
           <FieldRow
             Icon={CalendarBlank}
             label="Schedule"
-            value={scheduleLabel}
+            value={config.schedule.windows.length > 1
+              ? `${config.schedule.windows.length} windows · ${formatDayRange(config.schedule.days)}`
+              : scheduleLabel}
             onClick={() => setEditingSchedule((current) => !current)}
           />
           {editingSchedule ? (
             <div className="window-editor">
               <DaySelector days={config.schedule.days} onChange={(days) => updateSchedule("days", days)} />
-              <div className="time-fields">
-                <label>
-                  <span>Start time</span>
-                  <input
-                    type="time"
-                    value={config.schedule.start}
-                    onChange={(event) => updateSchedule("start", event.target.value)}
-                  />
-                </label>
-                <label>
-                  <span>End time</span>
-                  <input
-                    type="time"
-                    value={config.schedule.end}
-                    onChange={(event) => updateSchedule("end", event.target.value)}
-                  />
-                </label>
+              <div className="schedule-windows">
+                {config.schedule.windows.map((window, index) => (
+                  <div className="time-fields time-fields--window" key={`${window.start}-${window.end}-${index}`}>
+                    <label>
+                      <span>Window {index + 1} start</span>
+                      <input
+                        type="time"
+                        value={window.start}
+                        onChange={(event) => updateWindow(index, "start", event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      <span>Window {index + 1} end</span>
+                      <input
+                        type="time"
+                        value={window.end}
+                        onChange={(event) => updateWindow(index, "end", event.target.value)}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="icon-button icon-button--danger"
+                      aria-label={`Remove response window ${index + 1}`}
+                      disabled={config.schedule.windows.length === 1}
+                      onClick={() => updateSchedule("windows", config.schedule.windows.filter((_, itemIndex) => itemIndex !== index))}
+                    >
+                      <Trash size={20} weight="regular" aria-hidden="true" />
+                    </button>
+                  </div>
+                ))}
+                <Button
+                  icon={Plus}
+                  disabled={config.schedule.windows.length >= MAX_SCHEDULE_WINDOWS}
+                  onClick={() => updateSchedule("windows", [
+                    ...config.schedule.windows,
+                    { start: "16:00", end: "18:00" },
+                  ])}
+                >
+                  Add window
+                </Button>
               </div>
             </div>
           ) : null}
@@ -725,36 +779,86 @@ function VaultEditor({ title, description, items, onChange }) {
 function RepliesPanel({
   config,
   setConfig,
-  keyStatus,
-  setKeyStatus,
   setMessage,
+  onValidateProvider,
 }) {
+  const [providerId, setProviderId] = useState("deepseek");
+  const [secret, setSecret] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const [validationState, setValidationState] = useState("idle");
 
-  function updateAi(key, value) {
-    setConfig((current) => ({ ...current, ai: { ...current.ai, [key]: value } }));
-    if (key === "apiKey") setKeyStatus("idle");
+  function updateLlm(key, value) {
+    setConfig((current) => ({ ...current, llm: { ...current.llm, [key]: value } }));
   }
 
-  async function validateKey() {
-    setKeyStatus("validating");
+  function saveValidatedConnection(validatedProviderId, apiKey, model) {
+    setConfig((current) => {
+      const withoutProvider = current.llm.connections.filter(
+        (connection) => connection.providerId !== validatedProviderId,
+      );
+      const connection = {
+        providerId: validatedProviderId,
+        apiKey,
+        model,
+        status: "validated",
+        validatedAt: new Date().toISOString(),
+        error: "",
+      };
+      return {
+        ...current,
+        llm: {
+          ...current.llm,
+          connections: [...withoutProvider, connection],
+          activeProviderId: current.llm.activeProviderId || validatedProviderId,
+        },
+      };
+    });
+  }
+
+  async function validateAndSave(targetProviderId = providerId, apiKey = secret) {
+    setValidationState("validating");
     setMessage(null);
     try {
-      await validateDeepSeekKey(config.ai.apiKey);
-      setKeyStatus("valid");
-      setMessage({ tone: "info", text: "DeepSeek key validated. Chatbut can adapt saved acknowledgements." });
+      const result = await onValidateProvider(targetProviderId, apiKey);
+      saveValidatedConnection(targetProviderId, apiKey, result.model);
+      setValidationState("valid");
+      setSecret("");
+      const label = PROVIDERS.find((provider) => provider.id === targetProviderId)?.label ?? "Provider";
+      setMessage({ tone: "info", text: `${label} validated with ${result.model}. The connection was saved locally.` });
     } catch (error) {
-      setKeyStatus("invalid");
-      setMessage({ tone: "error", text: error instanceof Error ? error.message : "DeepSeek validation failed." });
+      setValidationState("invalid");
+      setSecret("");
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "LLM validation failed." });
     }
   }
+
+  function deleteConnection(targetProviderId) {
+    setConfig((current) => {
+      const connections = current.llm.connections.filter(
+        (connection) => connection.providerId !== targetProviderId,
+      );
+      return {
+        ...current,
+        llm: {
+          ...current.llm,
+          connections,
+          activeProviderId: current.llm.activeProviderId === targetProviderId
+            ? connections[0]?.providerId ?? ""
+            : current.llm.activeProviderId,
+          enabled: connections.length ? current.llm.enabled : false,
+        },
+      };
+    });
+  }
+
+  const selectedProvider = PROVIDERS.find((provider) => provider.id === providerId);
 
   return (
     <section className="workspace workspace--editor" aria-labelledby="replies-heading">
       <div className="section-heading section-heading--wide">
         <div>
           <h1 id="replies-heading">Keep replies human and bounded</h1>
-          <p>Chatbut randomly selects a saved response, then DeepSeek may adapt its wording without changing its acknowledge-and-defer intent.</p>
+          <p>Chatbut randomly selects a saved response. An optional LLM can adapt the wording without changing its acknowledge-and-defer intent.</p>
         </div>
       </div>
 
@@ -762,34 +866,50 @@ function RepliesPanel({
         <div className="api-panel__heading">
           <span className="api-panel__icon"><Key size={24} weight="regular" aria-hidden="true" /></span>
           <div>
-            <h2>DeepSeek connection</h2>
-            <p>Validated once per enable. The key stays in your plaintext local configuration file.</p>
+            <h2>LLM connections</h2>
+            <p>Bring your own provider key. Chatbut discovers a suitable text model, runs a small completion, and saves only validated connections.</p>
           </div>
-          <span className={`validation-badge validation-badge--${config.ai.enabled ? keyStatus : "disabled"}`}>
-            {!config.ai.enabled ? "Optional · off" : keyStatus === "valid" ? "Validated" : keyStatus === "validating" ? "Checking" : keyStatus === "invalid" ? "Invalid" : "Not checked"}
+          <span className={`validation-badge validation-badge--${config.llm.enabled ? "valid" : "disabled"}`}>
+            {config.llm.enabled ? "Adaptation on" : "Optional · off"}
           </span>
         </div>
         <Toggle
-          checked={config.ai.enabled}
-          onChange={(enabled) => {
-            updateAi("enabled", enabled);
-            setKeyStatus(enabled ? "idle" : "disabled");
-          }}
-          label={config.ai.enabled ? "AI adaptation enabled" : "Use saved responses only"}
-          description="Optional. Without DeepSeek, Chatbut sends the randomly selected saved response unchanged."
+          checked={config.llm.enabled}
+          onChange={(enabled) => updateLlm("enabled", enabled)}
+          label={config.llm.enabled ? "LLM adaptation enabled" : "Use saved responses only"}
+          description="Turning this off keeps saved connections but sends the selected vault response unchanged."
         />
-        {config.ai.enabled ? (
-          <>
-        <div className="api-panel__fields">
+
+        <div className="provider-workflow" aria-label="Add an LLM connection">
+          <label>
+            <span>Provider</span>
+            <select
+              value={providerId}
+              onChange={(event) => {
+                setProviderId(event.target.value);
+                setSecret("");
+                setValidationState("idle");
+              }}
+            >
+              {PROVIDERS.map((provider) => (
+                <option key={provider.id} value={provider.id}>
+                  {provider.label}{provider.hint ? ` · ${provider.hint}` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="secret-field">
-            <span>DeepSeek API key</span>
+            <span>{selectedProvider?.label} API key</span>
             <span className="input-shell">
               <LockKey size={20} weight="regular" aria-hidden="true" />
               <input
                 type={showKey ? "text" : "password"}
-                value={config.ai.apiKey}
-                onChange={(event) => updateAi("apiKey", event.target.value)}
-                placeholder="sk-…"
+                value={secret}
+                onChange={(event) => {
+                  setSecret(event.target.value);
+                  setValidationState("idle");
+                }}
+                placeholder="Paste provider key"
                 autoComplete="off"
               />
               <button
@@ -804,14 +924,70 @@ function RepliesPanel({
           <Button
             tone="support"
             icon={Key}
-            onClick={validateKey}
-            loading={keyStatus === "validating"}
-            success={keyStatus === "valid"}
-            disabled={!config.ai.apiKey || keyStatus === "validating"}
+            onClick={() => validateAndSave()}
+            loading={validationState === "validating"}
+            success={validationState === "valid"}
+            disabled={!secret || validationState === "validating"}
           >
-            {keyStatus === "valid" ? "Key valid" : "Validate key"}
+            {validationState === "valid" ? "Connection saved" : "Validate and save"}
           </Button>
         </div>
+        <p className="provider-cost-note">
+          Validation lists the models available to your key and sends one minimal completion, which may use a small number of billable tokens.
+        </p>
+
+        <fieldset className="provider-connections">
+          <legend>Saved connections</legend>
+          {config.llm.connections.length ? config.llm.connections.map((connection) => {
+            const provider = PROVIDERS.find((item) => item.id === connection.providerId);
+            const active = config.llm.activeProviderId === connection.providerId;
+            const needsAttention = connection.status !== "validated";
+            return (
+              <div className={`provider-connection${needsAttention ? " has-error" : ""}`} key={connection.providerId}>
+                <label>
+                  <input
+                    type="radio"
+                    name="active-llm-provider"
+                    value={connection.providerId}
+                    checked={active}
+                    onChange={() => updateLlm("activeProviderId", connection.providerId)}
+                  />
+                  <span className="provider-connection__copy">
+                    <strong>{provider?.label ?? connection.providerId}</strong>
+                    <span>{needsAttention ? connection.error || "Needs attention" : connection.model}</span>
+                  </span>
+                  <span className={`connection-state${needsAttention ? " is-error" : ""}`}>
+                    {needsAttention ? "Needs attention" : active ? "Active" : "Saved"}
+                  </span>
+                </label>
+                <div className="provider-connection__actions">
+                  {needsAttention ? (
+                    <Button
+                      onClick={() => validateAndSave(connection.providerId, connection.apiKey)}
+                      loading={validationState === "validating"}
+                    >
+                      Retry
+                    </Button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="icon-button icon-button--danger"
+                    onClick={() => deleteConnection(connection.providerId)}
+                    aria-label={`Delete ${provider?.label ?? connection.providerId} connection`}
+                  >
+                    <Trash size={20} weight="regular" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            );
+          }) : (
+            <div className="provider-empty">
+              <Key size={24} weight="regular" aria-hidden="true" />
+              <span><strong>No LLM connections saved</strong>Add a key above, or keep using saved responses only.</span>
+            </div>
+          )}
+        </fieldset>
+
         <div className="api-panel__options">
           <label>
             <span>Recent messages sent for context</span>
@@ -819,15 +995,15 @@ function RepliesPanel({
               type="number"
               min="3"
               max="10"
-              value={config.ai.recentMessageCount}
-              onChange={(event) => updateAi("recentMessageCount", Number(event.target.value))}
+              value={config.llm.recentMessageCount}
+              onChange={(event) => updateLlm("recentMessageCount", Number(event.target.value))}
             />
           </label>
           <label>
             <span>Reply language</span>
             <select
-              value={config.ai.language}
-              onChange={(event) => updateAi("language", event.target.value)}
+              value={config.llm.language}
+              onChange={(event) => updateLlm("language", event.target.value)}
             >
               <option value="en">English</option>
               <option value="zh">Chinese</option>
@@ -838,13 +1014,6 @@ function RepliesPanel({
             <span>Acknowledge and defer · maximum two sentences · fallback to the saved response</span>
           </div>
         </div>
-          </>
-        ) : (
-          <div className="bounded-copy bounded-copy--standalone">
-            <CheckCircle size={20} weight="bold" aria-hidden="true" />
-            <span>No chat content leaves Google Chat. Vault selection, delays, and safeguards still apply.</span>
-          </div>
-        )}
       </section>
 
       <div className="editor-grid editor-grid--vaults">
@@ -891,19 +1060,30 @@ function RepliesPanel({
 function SafetyPanel({
   config,
   setConfig,
-  debugFolder,
-  setDebugFolder,
   setMessage,
 }) {
-  async function selectFolder() {
+  const [logStatus, setLogStatus] = useState({ bytes: 0, sequence: 1 });
+
+  useEffect(() => {
+    getDebugLogStatus().then(setLogStatus).catch(() => {});
+  }, [config.debug.enabled]);
+
+  async function exportLogs() {
     try {
-      const handle = await chooseDebugFolder();
-      setDebugFolder(handle);
-      setMessage({ tone: "info", text: `Debug logs will be written to the selected folder “${handle.name}”.` });
+      await exportDebugLog();
+      setMessage({ tone: "info", text: "The current debug log was exported." });
     } catch (error) {
-      if (error?.name !== "AbortError") {
-        setMessage({ tone: "error", text: error instanceof Error ? error.message : "Folder access failed." });
-      }
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "The debug log could not be exported." });
+    }
+  }
+
+  async function startNewLog() {
+    try {
+      await clearDebugLog();
+      setLogStatus(await getDebugLogStatus());
+      setMessage({ tone: "info", text: "A new empty debug log is ready." });
+    } catch (error) {
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "The debug log could not be reset." });
     }
   }
 
@@ -990,20 +1170,21 @@ function SafetyPanel({
           {config.debug.enabled ? (
             <div className="debug-folder">
               <div>
-                <FolderOpen size={22} weight="regular" aria-hidden="true" />
+                <Database size={22} weight="regular" aria-hidden="true" />
                 <span>
-                  <strong>{debugFolder?.name || "No folder selected"}</strong>
-                  <small>Select the folder containing your configuration file.</small>
+                  <strong>{Math.round((logStatus.bytes || 0) / 1024).toLocaleString()} KB stored</strong>
+                  <small>Log {String(logStatus.sequence || 1).padStart(3, "0")} · rotates at 10 MB</small>
                 </span>
               </div>
-              <Button icon={FolderOpen} onClick={selectFolder}>Choose folder</Button>
+              <Button icon={DownloadSimple} onClick={exportLogs}>Export log</Button>
+              <Button icon={Plus} onClick={startNewLog}>Start new</Button>
             </div>
           ) : null}
         </section>
       </div>
 
       <InlineNotice tone="warning">
-        This proof of concept stores the DeepSeek key in plaintext. Anyone or any process with access to the configuration file can read it. Sending work messages to DeepSeek must also be allowed by your organization.
+        This proof of concept stores provider keys in plaintext inside this Chrome profile and exported JSON backups. Anyone with profile or backup access can read them. Sending work messages to an LLM provider must also be allowed by your organization.
       </InlineNotice>
 
       <section className="local-summary">
@@ -1015,7 +1196,7 @@ function SafetyPanel({
         <LockKey size={24} weight="regular" aria-hidden="true" />
         <div>
           <strong>Storage</strong>
-          <span>Selected local file only</span>
+          <span>Browser-local IndexedDB · manual JSON export</span>
         </div>
       </section>
     </section>
@@ -1025,40 +1206,27 @@ function SafetyPanel({
 export function App() {
   const [activeSection, setActiveSection] = useState("window");
   const [config, setConfigState] = useState(makeDefaultConfig);
-  const [fileRecord, setFileRecord] = useState(null);
-  const [debugFolder, setDebugFolder] = useState(null);
-  const [dirty, setDirty] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [keyStatus, setKeyStatus] = useState("idle");
+  const [configured, setConfigured] = useState(false);
+  const [storageLoading, setStorageLoading] = useState(true);
+  const [saveStatus, setSaveStatus] = useState("idle");
   const [enabled, setEnabled] = useState(false);
   const [message, setMessage] = useState(null);
   const [bookmarkletHref, setBookmarkletHref] = useState("");
-  const [rememberedHandle, setRememberedHandle] = useState(null);
   const [pairingToken] = useState(getOrCreatePairingToken);
-  const connectionNoncesRef = useRef(new Set());
   const bridgePortRef = useRef(null);
+  const validationRequestsRef = useRef(new Map());
+  const importInputRef = useRef(null);
   const configRef = useRef(config);
-  const fileRecordRef = useRef(fileRecord);
-  const debugFolderRef = useRef(debugFolder);
-  const debugWriteQueueRef = useRef(Promise.resolve());
   configRef.current = config;
-  fileRecordRef.current = fileRecord;
-  debugFolderRef.current = debugFolder;
 
   const validation = useMemo(() => validateConfig(config), [config]);
-  const canEnable = Boolean(
-    fileRecord?.handle
-    && validation.valid
-    && (!config.ai.enabled || keyStatus === "valid")
-    && isScheduleActive(config),
-  );
+  const canEnable = Boolean(configured && validation.valid);
 
   function setConfig(updater) {
     setConfigState((current) => {
       const next = typeof updater === "function" ? updater(current) : updater;
       return normalizeConfig(next);
     });
-    setDirty(true);
     setEnabled(false);
   }
 
@@ -1082,11 +1250,23 @@ export function App() {
       .catch(() => {
         if (!cancelled) setMessage({ tone: "error", text: "The bookmarklet could not be prepared. Reload this page or check the deployment." });
       });
-    getRememberedConfigHandle()
-      .then((handle) => {
-        if (!cancelled && handle) setRememberedHandle(handle);
+    loadLocalConfig()
+      .then((record) => {
+        if (cancelled) return;
+        if (record) {
+          setConfigState(record.config);
+          setConfigured(true);
+          setMessage({ tone: "info", text: "Your browser-local configuration was loaded." });
+        }
       })
-      .catch(() => {});
+      .catch((error) => {
+        if (!cancelled) {
+          setMessage({ tone: "error", text: error instanceof Error ? error.message : "Browser-local storage could not be read." });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setStorageLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -1122,85 +1302,25 @@ export function App() {
       token: pairingToken,
     });
 
-    async function handleBridgeMessage(event) {
+    function handleBridgeMessage(event) {
       const data = event.data;
       if (!data || typeof data !== "object" || typeof data.type !== "string") return;
-
-      if (data.type === "chatbut:request-config") {
-        if (typeof data.nonce !== "string" || data.nonce.length < 8) return;
-        connectionNoncesRef.current.add(data.nonce);
-        if (connectionNoncesRef.current.size > 10) {
-          connectionNoncesRef.current.delete(connectionNoncesRef.current.values().next().value);
-        }
-        const record = fileRecordRef.current;
-        if (!record?.handle) {
-          port.postMessage({
-            type: "chatbut:error",
-            nonce: data.nonce,
-            message: "Return to Chatbut and open or create a configuration file first.",
-          });
-          return;
-        }
-        port.postMessage({
-          type: "chatbut:config",
-          nonce: data.nonce,
-          config: normalizeConfig(configRef.current),
-          fileName: record.name,
-          debugReady: !configRef.current.debug.enabled || Boolean(debugFolderRef.current),
-        });
-        setMessage({
-          tone: "info",
-          text: `${record.name} connected to Google Chat for this tab session. Nothing is stored on the Google Chat origin.`,
-        });
-        return;
-      }
-
-      if (!connectionNoncesRef.current.has(data.nonce)) return;
-      if (data.type === "chatbut:update-config") {
-        const record = fileRecordRef.current;
-        if (!record?.handle) return;
+      if (data.type === "chatbut:config-changed" && data.config) {
         const nextConfig = normalizeConfig(data.config);
-        setConfigState(nextConfig);
-        configRef.current = nextConfig;
-        try {
-          await writeConfigFile(record.handle, nextConfig);
-          setDirty(false);
-          setMessage({ tone: "info", text: `Saved a Google Chat target change to ${record.name}.` });
-        } catch (error) {
-          setDirty(true);
-          setMessage({
-            tone: "error",
-            text: error instanceof Error ? error.message : "Could not save the Google Chat target change.",
-          });
+        if (JSON.stringify(nextConfig) !== JSON.stringify(configRef.current)) {
+          setConfigState(nextConfig);
         }
         return;
       }
-
-      if (
-        data.type === "chatbut:debug"
-        && configRef.current.debug.enabled
-        && debugFolderRef.current
-      ) {
-        const entry = {
-          at: typeof data.at === "string" ? data.at : new Date().toISOString(),
-          event: String(data.event ?? "runtime").slice(0, 100),
-          details: redactLogValue(
-            data.details && typeof data.details === "object" ? data.details : {},
-            configRef.current.ai.apiKey,
-          ),
-        };
-        debugWriteQueueRef.current = debugWriteQueueRef.current
-          .then(() => appendDebugLog(
-            debugFolderRef.current,
-            entry,
-            configRef.current.debug.maximumLogBytes,
-          ))
-          .catch((error) => {
-            setMessage({
-              tone: "error",
-              text: error instanceof Error ? error.message : "Could not write the Chatbut debug log.",
-            });
-          });
+      if (data.requestId && validationRequestsRef.current.has(data.requestId)) {
+        const pending = validationRequestsRef.current.get(data.requestId);
+        validationRequestsRef.current.delete(data.requestId);
+        window.clearTimeout(pending.timer);
+        if (data.type === "chatbut:provider-valid") {
+          pending.resolve({ model: data.model });
+        } else if (data.type === "chatbut:provider-invalid" || data.type === "chatbut:error") {
+          pending.reject(new Error(String(data.message || "Provider validation failed.")));
+        }
       }
     }
 
@@ -1213,114 +1333,97 @@ export function App() {
   }, [pairingToken]);
 
   useEffect(() => {
-    if (!enabled) return undefined;
-    const timer = window.setInterval(() => {
-      if (!isScheduleActive(config)) {
-        setEnabled(false);
-        setMessage({ tone: "warning", text: "Preview stopped because the configured window closed." });
-      }
-    }, 30_000);
-    return () => window.clearInterval(timer);
-  }, [config, enabled]);
+    if (!configured || storageLoading) return undefined;
+    setSaveStatus("saving");
+    const timer = window.setTimeout(() => {
+      saveLocalConfig(config, pairingToken)
+        .then(() => {
+          bridgePortRef.current?.postMessage({
+            type: "chatbut:config-app-saved",
+            config,
+          });
+          setSaveStatus("saved");
+        })
+        .catch((error) => {
+          setSaveStatus("error");
+          setMessage({ tone: "error", text: error instanceof Error ? error.message : "The local configuration could not be saved." });
+        });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [config, configured, pairingToken, storageLoading]);
 
-  async function useRememberedFile() {
-    try {
-      const permitted = await requestConfigHandlePermission(rememberedHandle);
-      if (!permitted) {
-        setMessage({ tone: "warning", text: "Chrome did not grant access to the remembered file." });
+  function validateProvider(providerId, apiKey) {
+    return new Promise((resolve, reject) => {
+      const port = bridgePortRef.current;
+      if (!port) {
+        reject(new Error("The local provider bridge is not ready. Reload Chatbut and retry."));
         return;
       }
-      const record = await readConfigHandle(rememberedHandle);
-      setFileRecord(record);
-      setConfigState(record.config);
-      setDirty(false);
-      setKeyStatus(record.config.ai.enabled ? "idle" : "disabled");
-      setRememberedHandle(null);
-      setMessage({ tone: "info", text: `Loaded remembered file ${record.name}.` });
-    } catch (error) {
-      setMessage({ tone: "error", text: error instanceof Error ? error.message : "The remembered file is unavailable." });
-    }
-  }
-
-  async function forgetRememberedFile() {
-    await forgetRememberedConfigHandle();
-    setRememberedHandle(null);
-    setMessage({ tone: "info", text: "Forgot the previous file. Choose Open or New when you are ready." });
-  }
-
-  async function handleOpen() {
-    setMessage(null);
-    try {
-      const record = await openConfigFile();
-      setFileRecord(record);
-      setConfigState(record.config);
-      setDirty(false);
-      setEnabled(false);
-      setKeyStatus(record.config.ai.enabled ? "idle" : "disabled");
-      setDebugFolder(null);
-      setMessage({
-        tone: "info",
-        text: record.config.ai.enabled
-          ? `Loaded ${record.name}. Validate the DeepSeek key before enabling.`
-          : `Loaded ${record.name}. Saved-response mode is ready.`,
+      const requestId = crypto.randomUUID();
+      const timer = window.setTimeout(() => {
+        validationRequestsRef.current.delete(requestId);
+        reject(new Error("Provider validation timed out. Check the network and retry."));
+      }, 45_000);
+      validationRequestsRef.current.set(requestId, { resolve, reject, timer });
+      port.postMessage({
+        type: "chatbut:validate-provider",
+        requestId,
+        providerId,
+        apiKey,
       });
-    } catch (error) {
-      if (error?.name !== "AbortError") {
-        setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to open the configuration." });
-      }
-    }
+    });
   }
 
   async function handleCreate() {
+    if (configured && !window.confirm("Replace the current browser-local configuration with the defaults? Export a backup first if you need it.")) {
+      return;
+    }
     setMessage(null);
     try {
       const nextConfig = makeDefaultConfig();
-      const record = await createConfigFile(nextConfig);
-      setFileRecord(record);
-      setConfigState(record.config);
-      setDirty(false);
+      await createLocalConfig(nextConfig, pairingToken);
+      setConfigState(nextConfig);
+      setConfigured(true);
       setEnabled(false);
-      setKeyStatus(nextConfig.ai.enabled ? "idle" : "disabled");
-      setDebugFolder(null);
-      setMessage({ tone: "info", text: `Created ${record.name}. Review the settings, then open Google Chat.` });
+      setSaveStatus("saved");
+      setMessage({ tone: "info", text: "Created the browser-local configuration. Review the settings, then install the bookmark." });
       setActiveSection("window");
     } catch (error) {
-      if (error?.name !== "AbortError") {
-        setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to create the configuration." });
-      }
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to create the configuration." });
     }
   }
 
-  async function handleSave() {
-    if (!fileRecord?.handle) return;
-    setSaving(true);
-    setMessage(null);
+  async function handleImportFile(event) {
+    const [file] = event.target.files ?? [];
+    event.target.value = "";
+    if (!file) return;
+    if (configured && !window.confirm("Replace the current browser-local configuration with this JSON backup?")) return;
     try {
-      await writeConfigFile(fileRecord.handle, config);
-      setDirty(false);
-      setMessage({ tone: "info", text: `Saved ${fileRecord.name} locally.` });
+      const record = await importConfigFile(file, pairingToken);
+      setConfigState(record.config);
+      setConfigured(true);
+      setEnabled(false);
+      setSaveStatus("saved");
+      setMessage({
+        tone: "info",
+        text: record.config.llm.connections.length
+          ? "Imported the backup. Validate imported LLM connections in this Chrome profile before enabling adaptation."
+          : "Imported the backup into browser-local storage.",
+      });
     } catch (error) {
-      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to save the configuration." });
-    } finally {
-      setSaving(false);
+      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to import the configuration." });
     }
   }
 
   async function handleOpenGoogleChat() {
-    if (!fileRecord?.handle) {
-      setMessage({ tone: "warning", text: "Open or create a configuration file first." });
+    if (!configured) {
+      setMessage({ tone: "warning", text: "Create or import a local configuration first." });
       return;
     }
     if (!validation.valid) {
       setMessage({ tone: "warning", text: validation.errors.join(" ") });
       return;
     }
-    if (config.debug.enabled && !debugFolder) {
-      setActiveSection("safety");
-      setMessage({ tone: "warning", text: "Choose the debug folder before opening Google Chat, or turn debug logging off." });
-      return;
-    }
-
     const chatWindow = window.open(
       GOOGLE_CHAT_URL,
       "chatbut-google-chat",
@@ -1332,50 +1435,54 @@ export function App() {
     chatWindow.focus();
 
     try {
-      if (dirty) {
-        setSaving(true);
-        await writeConfigFile(fileRecord.handle, config);
-        setDirty(false);
-      }
+      await saveLocalConfig(config, pairingToken);
       setMessage({
         tone: "info",
-        text: "Google Chat opened. Keep this configurator open, then click the Chatbut bookmark in Google Chat.",
+        text: "Google Chat opened in the Chatbut-managed tab. Click the Chatbut bookmark there; this configurator may now be closed.",
       });
     } catch (error) {
       setMessage({
         tone: "error",
-        text: error instanceof Error ? error.message : "Could not save the configuration before connecting.",
+        text: error instanceof Error ? error.message : "Could not save the configuration before opening Google Chat.",
       });
-    } finally {
-      setSaving(false);
     }
   }
 
   return (
     <div className="app-shell">
       <AppHeader
-        fileName={fileRecord?.name}
-        dirty={dirty}
-        onOpen={handleOpen}
+        configured={configured}
+        saveStatus={saveStatus}
+        onImport={() => importInputRef.current?.click()}
         onCreate={handleCreate}
-        onSave={handleSave}
-        saving={saving}
+        onExport={() => exportConfigFile(config)}
       />
       <Sidebar
         active={activeSection}
         onChange={setActiveSection}
-        ready={validation.valid && Boolean(fileRecord)}
+        ready={validation.valid && configured}
       />
       <main className="app-main">
-        {rememberedHandle && !fileRecord ? (
-          <section className="remembered-file" aria-label="Remembered configuration">
-            <FileText size={22} weight="regular" aria-hidden="true" />
+        <input
+          ref={importInputRef}
+          className="visually-hidden"
+          type="file"
+          accept=".json,.chatbut,application/json"
+          aria-hidden="true"
+          tabIndex="-1"
+          onChange={handleImportFile}
+        />
+        {!storageLoading && !configured ? (
+          <section className="setup-empty" aria-labelledby="setup-empty-heading">
+            <span className="setup-empty__icon"><Database size={30} weight="regular" aria-hidden="true" /></span>
             <div>
-              <strong>Use your previous local configuration?</strong>
-              <span>Chrome remembers the file handle, but Chatbut will not open it without your permission.</span>
+              <h1 id="setup-empty-heading">No local configuration yet</h1>
+              <p>Create the default setup in this Chrome profile, or import a JSON backup. Bookmark installation and Google Chat stay locked until then.</p>
             </div>
-            <Button tone="support" onClick={useRememberedFile}>Use file</Button>
-            <Button onClick={forgetRememberedFile}>Forget</Button>
+            <div className="setup-empty__actions">
+              <Button tone="primary" icon={Plus} onClick={handleCreate}>Create local configuration</Button>
+              <Button icon={FileArrowUp} onClick={() => importInputRef.current?.click()}>Import JSON</Button>
+            </div>
           </section>
         ) : null}
         {message ? (
@@ -1387,7 +1494,7 @@ export function App() {
           </div>
         ) : null}
 
-        {activeSection === "window" ? (
+        {configured && activeSection === "window" ? (
           <WindowPanel
             config={config}
             setConfig={setConfig}
@@ -1395,39 +1502,35 @@ export function App() {
             canEnable={canEnable}
             enabled={enabled}
             setEnabled={setEnabled}
-            fileName={fileRecord?.name}
-            keyStatus={keyStatus}
+            configured={configured}
             setMessage={setMessage}
             bookmarkletHref={bookmarkletHref}
             onOpenGoogleChat={handleOpenGoogleChat}
           />
         ) : null}
-        {activeSection === "people" ? (
+        {configured && activeSection === "people" ? (
           <PeoplePanel config={config} setConfig={setConfig} />
         ) : null}
-        {activeSection === "replies" ? (
+        {configured && activeSection === "replies" ? (
           <RepliesPanel
             config={config}
             setConfig={setConfig}
-            keyStatus={keyStatus}
-            setKeyStatus={setKeyStatus}
             setMessage={setMessage}
+            onValidateProvider={validateProvider}
           />
         ) : null}
-        {activeSection === "safety" ? (
+        {configured && activeSection === "safety" ? (
           <SafetyPanel
             config={config}
             setConfig={setConfig}
-            debugFolder={debugFolder}
-            setDebugFolder={setDebugFolder}
             setMessage={setMessage}
           />
         ) : null}
       </main>
       <footer className="app-footer">
         <span>Chatbut · local-first proof of concept</span>
-        <span>Keep this tab open while Chatbut runs.</span>
-        <button type="button" className="app-footer__link" onClick={handleOpenGoogleChat} disabled={!fileRecord}>
+        <span>Configuration and optional logs stay in this Chrome profile.</span>
+        <button type="button" className="app-footer__link" onClick={handleOpenGoogleChat} disabled={!configured}>
           Open Google Chat <ArrowSquareOut size={16} weight="bold" aria-hidden="true" />
         </button>
       </footer>

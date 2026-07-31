@@ -1,57 +1,64 @@
 # Chatbut design QA
 
-Date: 2026-07-30
+Date: 2026-07-31
 
 Selected direction: Workbench, warm editorial utility
+
 Source reference: `C:\Users\jiannystein\.codex\generated_images\019fb25d-d13e-7951-a232-edef17b2594b\call_mLt8z22LFOJmhpqdzihdvfpy.png`
 
-## Comparison
+## Hallmark preflight
 
-The selected source and current implementation were placed side by side at the
-same panel dimensions in
-`app/design-comparison-final.png`. The comparison confirms the intended
-left-rail workbench, compact masthead, warm paper surface, black/orange/green
-palette, schedule-led hierarchy, and persistent Google Chat overlay preview.
-The implementation adds the necessary install strip without changing the
-reference's main composition.
+- React 19 and Vite 6 application.
+- Newsreader Variable display type and Manrope Variable body type.
+- Centralized semantic OKLCH palette with warm paper, black ink, orange action,
+  and green support states.
+- Semantic 4 px-based spacing scale.
+- Motion-cut stance: short CSS state transitions only, with reduced-motion
+  removal.
+- Cached findings: `.hallmark/preflight.json`.
+
+The redesign preserved the selected macrostructure, typography, palette,
+spacing, and compact utility density. It extended the system for multi-window
+scheduling, explicit browser-local setup, and multi-provider LLM connection
+states.
 
 ## Interaction checks
 
+- First run contains explicit **Create local configuration** and **Import JSON**
+  paths. Bookmark installation and Google Chat actions remain locked until
+  setup exists.
 - Window, People, Replies, and Safety navigation is keyboard-accessible and
   visibly stateful.
-- The bookmarklet link retains a real `javascript:` URL after React renders and
-  exposes a drag payload suitable for Chrome's bookmarks bar.
-- The configurator owns the local file and exposes an **Open Google Chat**
-  action. The paired bookmark creates a short-lived tab bridge and offers a
-  clear **Retry connection** recovery state instead of opening a second file
-  picker.
-- AI adaptation can be switched off; saved response vaults remain usable.
-- Independent 1:1 and Space invitation toggles are present and default off.
-- Information tooltips use an 800 ms hover delay and immediate keyboard-focus
-  disclosure.
-- New/open/save, schedule, delay, vault, targeting, key visibility, language,
-  debug, connected-tab, retry, and stop/enable states have explicit
-  disabled/focus behavior.
+- Bookmark copy specifies: drag once into bookmarks, then click while on the
+  Google Chat page.
+- Multiple schedule windows, outside-window confirmation, invitation toggles,
+  target search, response vaults, delay/cooldown, provider validation, active
+  provider selection, debug export/reset, and Stop/Enable states are covered.
+- Invalid provider credentials show an actionable non-secret error and are not
+  saved.
+- Information tooltips disclose off-by-default invitation behavior.
+- LLM adaptation remains optional; saved-response mode is complete.
 
-## Layout and accessibility
+## Responsive and accessibility checks
 
-- Desktop Chrome visual review passed at 1422 × 1070.
-- Existing responsive visual captures cover 320, 375, 414, and 768 CSS pixels.
-- Both `html` and `body` use `overflow-x: clip`.
-- Grid tracks that can carry flexible content use `minmax(0, 1fr)`.
-- Buttons and navigation labels do not wrap.
-- Reduced-motion rules remove animation and transition effects.
-- All visible icons come from one library; the logo is a generated raster asset.
-- Key sampled contrast ratios: ink/paper 16.52:1, muted/paper 5.69:1,
+- Desktop Chrome visual review passed at 1280 CSS pixels.
+- Responsive Chrome checks passed at 320, 375, 414, and 768 CSS pixels.
+- Measured `scrollWidth === clientWidth` at every required mobile/tablet width.
+- Grid tracks carrying flexible content use `minmax(0, 1fr)`.
+- Buttons and navigation labels remain readable without accidental wrapping.
+- Visible focus, hover, active, disabled, loading, success, warning, and error
+  states are defined.
+- Reduced-motion rules remove transitions and animation.
+- Visible icons use Phosphor; the product mark is a generated raster asset.
+- Sampled contrast remains: ink/paper 16.52:1, muted/paper 5.69:1,
   support/support-soft 6.24:1, and light-ink/support 6.95:1.
 
-## Hallmark review
+## Hallmark slop test
 
-The 58-gate slop test was applied to the final configurator and injected
-overlay. No generic hero/card-grid structure, gradient text, decorative browser
-chrome, fabricated metric, mixed icon library, unbounded accent field, or
-unsupported interaction state remains. The design tokens are centralized in
-`app/src/tokens.css`; the CSS stamp records the macrostructure, critique scores,
-contrast, structural, responsive, and mobile passes.
+The final surface has no generic hero/card-grid structure, gradient text,
+decorative browser chrome, fabricated metrics, mixed icon library, unbounded
+accent fields, default-purple AI styling, or unsupported visible interaction.
+Tokens remain centralized in `app/src/tokens.css`; the `app/src/styles.css`
+stamp records the Workbench structure, critique scores, and final gates.
 
-final result: passed
+Final result: passed.
