@@ -2,6 +2,12 @@
 
 Status: Google Chat POC implemented and locally verified on 2026-07-31.
 
+## Deferred product TODO
+
+- [ ] Move both reply-timing controls into **Window**. Rename the current
+  reply-delay control to **First reply delay** and the Vault 2 cooldown to
+  **Second / last reply delay**; keep the current timing behavior unchanged.
+
 ## Product objective
 
 Build a public, accountless GitHub Pages app that installs a Chrome bookmarklet

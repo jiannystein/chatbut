@@ -76,13 +76,15 @@ function recentRows() {
 function currentConversation() {
   const main = uniqueVisible(MAIN_SELECTOR);
   if (!main) return null;
-  const row = recentRows().find((item) => item.id === main.dataset.groupId);
+  const id = main.dataset.groupId;
+  const row = recentRows().find((item) => item.id === id);
+  const sidebarRow = [...document.querySelectorAll(ROW_SELECTOR)]
+    .find((item) => item.dataset.groupId === id);
   return {
-    id: main.dataset.groupId,
-    kind: row?.kind || (
-      String(main.dataset.groupId).startsWith("dm/")
-        ? classifyConversation(main.dataset.groupId, "direct")
-        : "unknown"
+    id,
+    kind: row?.kind || classifyConversation(
+      id,
+      sidebarRow ? conversationSection(sidebarRow) : id.startsWith("dm/") ? "direct" : "unknown",
     ),
     main,
   };
@@ -608,7 +610,7 @@ class ChatbutRuntime {
       if (previousId) await navigateTo(previousId);
       return;
     }
-    const target = { ...conversation, ...message };
+    const target = { ...message, ...conversation };
     if (!isTargetAllowed(this.config, target)) {
       this.processed.add(message.id);
       await this.debug?.write("skip", { id, reason: "target_not_allowed" });
