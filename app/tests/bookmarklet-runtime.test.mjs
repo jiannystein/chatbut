@@ -14,10 +14,10 @@ const runtime = (await readFile(
     "https://jiannystein.github.io/chatbut/chatbut-bridge.html",
   );
 
-function makeDom(url, { popupBlocked = false } = {}) {
+function makeDom(url, { popupBlocked = false, html = "<!doctype html><html><head></head><body></body></html>" } = {}) {
   const openedWindows = [];
   const bridgeWindow = { closed: false };
-  const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", {
+  const dom = new JSDOM(html, {
     url,
     pretendToBeVisual: true,
     runScripts: "dangerously",
@@ -29,6 +29,10 @@ function makeDom(url, { popupBlocked = false } = {}) {
         postMessage() {}
         close() {}
       };
+      Object.defineProperty(window.HTMLElement.prototype, "offsetParent", {
+        configurable: true,
+        get() { return this.parentElement || window.document.body; },
+      });
       window.open = (openedUrl, name, features) => {
         openedWindows.push({ url: openedUrl, name, features });
         return popupBlocked ? null : bridgeWindow;
@@ -49,7 +53,69 @@ test("bookmarklet refuses unsupported pages without injecting controls", () => {
   }
 });
 
-test("bookmarklet explains how to recover when Chrome blocks the helper popup", () => {
+test("bookmarklet indexes direct, group-DM, and Space rows with safe labels", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <button aria-label="Google Account: Test User (test@example.com)"></button>
+    <section aria-label="List of direct messages.">
+      <div role="listitem" data-group-id="dm/person" data-display-timestamp="10">
+        <span aria-label="Press tab for more options."></span><span dir="auto">Direct Person</span>
+      </div>
+      <div role="listitem" data-group-id="space/group-dm" data-display-timestamp="20">
+        <span aria-label="Press tab for more options."></span><span dir="auto">Project Group</span>
+      </div>
+    </section>
+    <section aria-label="List of spaces.">
+      <div role="listitem" data-group-id="space/project" data-display-timestamp="30">
+        <span aria-label="Press tab for more options."></span><span dir="auto">Project Space</span>
+      </div>
+    </section>
+  </body></html>`;
+  const { dom, openedWindows, bridgeWindow } = makeDom(
+    "https://chat.google.com/app/home",
+    { html },
+  );
+  const sent = [];
+  const port = {
+    onmessage: null,
+    start() {},
+    postMessage(message) { sent.push(message); },
+  };
+  try {
+    dom.window.eval(runtime);
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce },
+      origin: "https://jiannystein.github.io",
+      source: bridgeWindow,
+      ports: [port],
+    }));
+    port.onmessage({
+      data: {
+        type: "chatbut:config",
+        nonce,
+        config: structuredClone(DEFAULT_CONFIG),
+        fileName: "Browser-local configuration",
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const update = sent.find((message) => message.type === "chatbut:update-config");
+    assert.ok(update);
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(
+        update.config.targeting.indexedChats.map(({ label, kind }) => ({ label, kind })),
+      )),
+      [
+        { label: "Direct Person", kind: "direct" },
+        { label: "Project Group", kind: "group-direct" },
+        { label: "Project Space", kind: "space" },
+      ],
+    );
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("bookmarklet explains how to recover when Chrome blocks the helper tab", () => {
   const { dom } = makeDom(
     "https://chat.google.com/app/home",
     { popupBlocked: true },
@@ -58,7 +124,7 @@ test("bookmarklet explains how to recover when Chrome blocks the helper popup", 
     dom.window.eval(runtime);
     const root = dom.window.document.getElementById("chatbut-runtime");
     assert.ok(root);
-    assert.match(root.textContent, /blocked the helper popup/i);
+    assert.match(root.textContent, /blocked the helper tab/i);
     assert.doesNotMatch(root.textContent, /Choose file/);
     assert.equal(root.querySelector('[data-role="mode"]').textContent, "Disabled");
     assert.equal(root.querySelector('[data-role="enable"]').disabled, true);
@@ -81,6 +147,9 @@ test("bookmarklet receives an in-memory configuration from its trusted helper po
   try {
     dom.window.eval(runtime);
     assert.equal(openedWindows.length, 1);
+    assert.equal(openedWindows[0].name, "_blank");
+    assert.equal(openedWindows[0].features, undefined);
+    assert.match(openedWindows[0].url, /\.handoff$/);
     const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
     dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
       data: {
@@ -106,6 +175,8 @@ test("bookmarklet receives an in-memory configuration from its trusted helper po
     assert.match(root.textContent, /Connected to chatbut\.config\.json/);
     assert.equal(root.querySelector('[data-role="enable"]').disabled, false);
     assert.equal(root.querySelector('[data-role="connect"]').hidden, true);
+    assert.equal(root.querySelector('[data-role="metric-replies"]').textContent, "0");
+    assert.equal(root.querySelector(".cb-search"), null);
 
     await root.chatbutRuntime.saveConfig();
     assert.equal(sent.at(-1).type, "chatbut:update-config");
@@ -258,7 +329,7 @@ test("outside-schedule confirmation creates a one-session override", async () =>
     root.querySelector('[data-role="enable"]').click();
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(root.chatbutRuntime.scheduleOverride, true);
-    assert.match(root.textContent, /one-session schedule override/i);
+    assert.match(root.textContent, /Schedule overridden for this session/i);
     root.chatbutRuntime.stop("Test complete.");
   } finally {
     dom.window.close();
