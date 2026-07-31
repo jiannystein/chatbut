@@ -707,10 +707,11 @@ class ChatbutRuntime {
       composer.focus();
       composer.textContent = reply;
       composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: reply }));
-      await sleep(100);
+      await sleep(1000);
       if (currentConversation()?.id !== id || send[0].disabled) {
         composer.textContent = "";
         composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContent" }));
+        await this.debug?.write("skip", { reason: "send_not_ready" });
         if (previousId) await navigateTo(previousId);
         return;
       }
