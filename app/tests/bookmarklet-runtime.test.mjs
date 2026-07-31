@@ -267,6 +267,67 @@ test("comparison metadata shared by both authors does not hide an incoming messa
   }
 });
 
+test("a selected Space keeps its classification when its sidebar row becomes hidden", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <button aria-label="Google Account: Test User (test@example.com)"></button>
+    <section aria-label="List of direct messages.">
+      <div role="listitem" data-group-id="dm/original" data-display-timestamp="1">
+        <span>Original chat</span>
+      </div>
+    </section>
+    <section aria-label="List of spaces.">
+      <div role="listitem" data-group-id="space/project" data-display-timestamp="${Date.now() + 10_000}">
+        <span>Project Space</span>
+      </div>
+    </section>
+    <main role="main" data-group-id="dm/original"></main>
+  </body></html>`;
+  const { dom } = makeDom("https://chat.google.com/app/home", { html });
+  try {
+    const main = dom.window.document.querySelector("main");
+    const spaceRow = dom.window.document.querySelector('[data-group-id="space/project"]');
+    spaceRow.addEventListener("click", () => {
+      Object.defineProperty(spaceRow, "offsetParent", { configurable: true, get: () => null });
+      main.dataset.groupId = "space/project";
+      main.innerHTML = `
+        <div role="group" data-id="space-message" data-user-id="sender">
+          <span data-message-id="space-message" data-member-id="user/sender">Sender</span>
+          <span data-user-email="test@example.com" data-user-mention-type="3">Test User</span>
+        </div>
+      `;
+    });
+    dom.window.eval(runtime);
+    const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
+    runtimeInstance.config = {
+      ...structuredClone(DEFAULT_CONFIG),
+      targeting: {
+        ...structuredClone(DEFAULT_CONFIG.targeting),
+        selectedGroups: [{ id: "space/project", label: "Project Space", kind: "space" }],
+      },
+      delays: { minimumSeconds: 60, maximumSeconds: 60, followUpMinutes: 1 },
+    };
+    runtimeInstance.enabled = true;
+    runtimeInstance.enableAt = 0;
+    runtimeInstance.selfEmail = "test@example.com";
+    const debugEvents = [];
+    runtimeInstance.debug = {
+      async write(event, details) { debugEvents.push({ event, details }); },
+    };
+
+    await runtimeInstance.queueConversation("space/project");
+
+    assert.equal(runtimeInstance.pending.has("space/project"), true, JSON.stringify({
+      currentId: main.dataset.groupId,
+      processed: [...runtimeInstance.processed],
+      debugEvents,
+    }));
+    assert.equal(runtimeInstance.processed.has("space-message"), true);
+    runtimeInstance.stop("Test complete.");
+  } finally {
+    dom.window.close();
+  }
+});
+
 test("bookmarklet explains how to recover when Chrome blocks the helper tab", () => {
   const { dom } = makeDom(
     "https://chat.google.com/app/home",
