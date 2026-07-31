@@ -104,7 +104,7 @@ function latestIncoming(main, selfEmail) {
   if (
     !author
     || author.dataset.originGsuiteApp === "1"
-    || author.dataset.compareToSelfUser === "true"
+    || /^(you|你)$/i.test(textOf(author))
   ) return null;
   const mentionEmails = [...group.querySelectorAll("span[data-user-email]")]
     .map((node) => node.getAttribute("data-user-email"))
@@ -744,10 +744,7 @@ class ChatbutRuntime {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await sleep(100);
       const groups = [...main.querySelectorAll(MESSAGE_SELECTOR)].filter(visible);
-      const newGroups = groups.filter((group) => group.dataset.id && !previousIds.has(group.dataset.id));
-      const sentGroup = newGroups.find(
-        (group) => group.querySelector('[data-compare-to-self-user="true"]'),
-      ) || newGroups[0];
+      const sentGroup = groups.find((group) => group.dataset.id && !previousIds.has(group.dataset.id));
       if (!sentGroup) continue;
       sentGroup.dataset.chatbutSelf = "true";
       this.processed.add(sentGroup.dataset.id);

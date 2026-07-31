@@ -194,7 +194,7 @@ test("delayed sends for several chats are serialized instead of racing navigatio
   }
 });
 
-test("native self-authorship markers prevent outgoing messages from becoming triggers", async () => {
+test("the rendered You author label prevents outgoing messages from becoming triggers", async () => {
   const html = `<!doctype html><html><head></head><body>
     <section aria-label="List of direct messages.">
       <div role="listitem" data-group-id="dm/person" data-display-timestamp="${Date.now() + 10_000}">
@@ -207,7 +207,7 @@ test("native self-authorship markers prevent outgoing messages from becoming tri
           data-message-id="outgoing-message"
           data-member-id="user/self"
           data-compare-to-self-user="true"
-        >Automated reply</span>
+        >You</span>
       </div>
     </main>
   </body></html>`;
@@ -223,6 +223,45 @@ test("native self-authorship markers prevent outgoing messages from becoming tri
 
     assert.equal(runtimeInstance.pending.size, 0);
     assert.equal(runtimeInstance.processed.has("outgoing-message"), false);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("comparison metadata shared by both authors does not hide an incoming message", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <section aria-label="List of direct messages.">
+      <div role="listitem" data-group-id="dm/person" data-display-timestamp="${Date.now() + 10_000}">
+        <span>Direct Person</span>
+      </div>
+    </section>
+    <main role="main" data-group-id="dm/person">
+      <div role="group" data-id="incoming-message" data-user-id="sender">
+        <span
+          data-message-id="incoming-message"
+          data-member-id="user/sender"
+          data-compare-to-self-user="true"
+          data-show-self-user-as-you="true"
+        >Direct Person</span>
+      </div>
+    </main>
+  </body></html>`;
+  const { dom } = makeDom("https://chat.google.com/app/home", { html });
+  try {
+    dom.window.eval(runtime);
+    const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
+    runtimeInstance.config = {
+      ...structuredClone(DEFAULT_CONFIG),
+      delays: { minimumSeconds: 1, maximumSeconds: 1, followUpMinutes: 1 },
+    };
+    runtimeInstance.enabled = true;
+    runtimeInstance.enableAt = 0;
+
+    await runtimeInstance.queueConversation("dm/person");
+
+    assert.equal(runtimeInstance.pending.has("dm/person"), true);
+    assert.equal(runtimeInstance.processed.has("incoming-message"), true);
+    runtimeInstance.stop("Test complete.");
   } finally {
     dom.window.close();
   }
