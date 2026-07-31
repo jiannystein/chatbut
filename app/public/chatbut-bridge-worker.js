@@ -385,6 +385,7 @@ self.onconnect = (event) => {
   let role = "";
   let token = "";
   let room = null;
+  let releaseVersion = "";
 
   port.onmessage = async (messageEvent) => {
     const message = messageEvent.data;
@@ -393,6 +394,9 @@ self.onconnect = (event) => {
     if (message.type === "chatbut:register") {
       token = String(message.token ?? "");
       role = message.role;
+      releaseVersion = /^\d+\.\d+\.\d+$/.test(String(message.releaseVersion ?? ""))
+        ? String(message.releaseVersion)
+        : "";
       if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return;
       if (role !== "configurator" && role !== "runtime") return;
       room = roomFor(token);
@@ -421,6 +425,7 @@ self.onconnect = (event) => {
         config: configForRuntime(record.config),
         fileName: LOCAL_CONFIG_NAME,
         debugReady: true,
+        latestRelease: releaseVersion,
       });
       return;
     }

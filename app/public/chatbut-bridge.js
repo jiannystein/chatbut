@@ -2,6 +2,7 @@ const status = document.getElementById("bridge-status");
 const [token = "", nonce = "", mode = ""] = location.hash.slice(1).split(".");
 const openerOrigin = "https://chat.google.com";
 const cleanGoogleChatUrl = "https://chat.google.com/app/home";
+const releaseVersion = String(globalThis.CHATBUT_RELEASE_VERSION || "");
 
 function fail(message) {
   status.textContent = message;
@@ -27,6 +28,7 @@ if (
       type: "chatbut:register",
       role: "runtime",
       token,
+      releaseVersion,
     });
     window.opener.postMessage(
       {

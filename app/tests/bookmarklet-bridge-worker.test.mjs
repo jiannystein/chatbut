@@ -133,7 +133,7 @@ test("bridge worker serves paired browser-local config without a configurator ta
   connect(workerScope, unrelated);
 
   configurator.receive({ type: "chatbut:register", role: "configurator", token });
-  runtime.receive({ type: "chatbut:register", role: "runtime", token });
+  runtime.receive({ type: "chatbut:register", role: "runtime", token, releaseVersion: "0.2.0" });
   unrelated.receive({ type: "chatbut:register", role: "runtime", token: "b".repeat(32) });
   runtime.receive({ type: "chatbut:request-config", nonce: "nonce-123" });
   unrelated.receive({ type: "chatbut:request-config", nonce: "nonce-other" });
@@ -143,6 +143,7 @@ test("bridge worker serves paired browser-local config without a configurator ta
   assert.equal(runtime.sent.at(-1).type, "chatbut:config");
   assert.equal(runtime.sent.at(-1).nonce, "nonce-123");
   assert.equal(runtime.sent.at(-1).config.version, 2);
+  assert.equal(runtime.sent.at(-1).latestRelease, "0.2.0");
   assert.equal("apiKey" in runtime.sent.at(-1).config.llm.connections[0], false);
   assert.equal(unrelated.sent.at(-1).type, "chatbut:error");
 

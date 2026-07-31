@@ -20,6 +20,37 @@ export function isRuntimeScheduleActive(config, date = new Date()) {
   });
 }
 
+export function nextRuntimeWindowStart(config, date = new Date()) {
+  const days = config?.schedule?.days;
+  const windows = config?.schedule?.windows;
+  if (!Array.isArray(days) || !Array.isArray(windows)) return null;
+  let next = null;
+  for (let offset = 0; offset <= 7; offset += 1) {
+    const day = new Date(date);
+    day.setDate(date.getDate() + offset);
+    day.setHours(0, 0, 0, 0);
+    if (!days.includes(day.getDay())) continue;
+    for (const window of windows) {
+      const start = minutes(window.start);
+      if (start < 0) continue;
+      const candidate = new Date(day);
+      candidate.setMinutes(start);
+      if (candidate > date && (!next || candidate < next)) next = candidate;
+    }
+  }
+  return next;
+}
+
+export function formatRuntimeCountdown(milliseconds) {
+  const seconds = Math.max(0, Math.ceil(Number(milliseconds) / 1_000));
+  const hours = Math.floor(seconds / 3_600);
+  const minutesPart = Math.floor((seconds % 3_600) / 60);
+  const secondsPart = seconds % 60;
+  return [hours, minutesPart, secondsPart]
+    .map((part) => String(part).padStart(2, "0"))
+    .join(":");
+}
+
 export function validateRuntimeConfig(config) {
   const errors = [];
   if (!config || config.version !== 2) errors.push("Open Chatbut once to upgrade this configuration.");
@@ -31,7 +62,7 @@ export function validateRuntimeConfig(config) {
     const active = config.llm.connections?.find(
       (connection) => connection.providerId === config.llm.activeProviderId,
     );
-    if (!active?.apiKey || !active?.model || active.status !== "validated") {
+    if (!active?.model || active.status !== "validated") {
       errors.push("Validate the active LLM connection before enabling.");
     }
   }

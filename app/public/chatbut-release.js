@@ -1,0 +1,1 @@
+globalThis.CHATBUT_RELEASE_VERSION="0.2.0";
