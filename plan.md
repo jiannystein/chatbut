@@ -7,6 +7,16 @@ Status: Google Chat POC implemented and locally verified on 2026-07-31.
 - [ ] Move both reply-timing controls into **Window**. Rename the current
   reply-delay control to **First reply delay** and the Vault 2 cooldown to
   **Second / last reply delay**; keep the current timing behavior unchanged.
+- [ ] Show the Chatbut release version on both the web app and installed
+  bookmarklet widget. When the web app reports a newer release, show a clear
+  **Update available** notice with the installed and latest versions and tell
+  the user to remove and re-drag the bookmark. Do not block normal use solely
+  because a version check is unavailable.
+- [ ] Improve the pre-schedule state: load the widget disabled with a neutral
+  **Starts in HH:MM:SS** countdown that automatically enables at the next
+  configured window. Keep **Enable now** as a secondary action protected by
+  the existing outside-schedule confirmation. Use total hours when the next
+  window is more than one day away so the countdown remains unambiguous.
 
 ## Product objective
 
