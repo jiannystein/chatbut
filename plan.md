@@ -285,13 +285,13 @@ Failure behavior:
 
 ## Verification record
 
-Completed locally on 2026-07-31:
+Completed locally and in coordinated desktop-Chrome acceptance on 2026-07-31:
 
-- 35 configuration, state-machine, bridge, provider, targeting, redaction, and
+- 40 configuration, state-machine, bridge, provider, targeting, redaction, and
   runtime tests passed.
 - 4 hosting/package tests passed.
 - Production Vite build passed.
-- Encoded bookmarklet: 32,665 of 32,768 bytes.
+- Encoded bookmarklet: 32,768 of 32,768 bytes.
 - Provider CORS preflight passed for model and generation endpoints for
   DeepSeek, OpenAI, Claude, Kimi Global, and Kimi China from the GitHub Pages
   origin.
@@ -300,18 +300,13 @@ Completed locally on 2026-07-31:
 - Browser-local configuration persisted across reload.
 - Invalid DeepSeek credentials produced a non-secret, actionable error and
   were not saved.
-- Live Google Chat verified the direct/Space sidebar sections and signed-in
-  identity signal. Fixtures cover 1:1, multi-person DM, and Space
-  classification, safe labels, and opt-in prefiltering.
-
-Remaining user acceptance:
-
-- Replace the old bookmark with the newly published **💬 Chatbut** bookmark.
-- Click it in the prepared Google Chat test conversation.
-- Enable and observe one controlled 1:1 reply, one multi-person DM mention, and
-  one opted-in Space mention inside the configured delay.
-- Confirm the correct conversation, ordinary user attribution, saved-only
-  fallback, Stop control, and no duplicate send.
+- Live Google Chat verified independent 1:1 first replies, a post-cooldown
+  second reply, and immediate-follow-up suppression.
+- Live opted-in Space acceptance verified no reply without a mention, first and
+  post-cooldown replies for real self `@mentions`, immediate eligible-follow-up
+  suppression, ordinary signed-in-user attribution, and no duplicate send.
+- Fixtures additionally cover multi-person DM classification and mention/reply
+  policy, safe labels, opt-in prefiltering, and delayed Space Send activation.
 
 ## Known risks
 
