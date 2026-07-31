@@ -67,15 +67,16 @@ The POC is feasible through browser-interface automation.
   they pass validation in the current profile.
 - A random pairing token is embedded when the bookmark is installed.
 - Clicking the bookmark turns the current Google Chat page into a dedicated
-  automation tab and opens a helper at the exact Chatbut origin. The helper
+  automation tab after an explicit confirmation and opens a helper at the
+  exact Chatbut origin. Cancellation leaves Google Chat untouched. The helper
   transfers a paired `SharedWorker` message port to the exact Google Chat
   opener, then navigates itself to a clean Google Chat tab for normal use.
 - The worker can serve configuration after the configurator tab closes.
 - Configuration edits synchronize to a connected runtime. Google Chat target
   changes synchronize back into browser-local storage.
-- Successful workbench edits show a saved toast. Reinstalling the bookmark is
-  unnecessary for settings changes and required only after a Chatbut version
-  update.
+- Successful workbench edits show a saved toast that remains until the user
+  selects **OK**. Reinstalling the bookmark is unnecessary for settings
+  changes and required only after a Chatbut version update.
 - LLM keys stay in the Chatbut-origin worker. They are removed from
   configuration copies sent to Google Chat.
 - Every enable is manual and non-persistent.
@@ -154,7 +155,8 @@ State is per conversation and per enable session.
    cooldown, default 1 minute and configurable from 1–5 minutes.
 7. Vault 2 never sends merely because the cooldown elapsed.
 8. A manual user message stops automation for that conversation until the next
-   enable.
+   enable. Automated composer activity and native outgoing-message groups must
+   not set this state.
 9. Disabling and re-enabling starts a new session.
 10. Delayed sends are serialized so simultaneous eligible chats cannot race
     each other while the automation tab navigates.
