@@ -38,9 +38,13 @@ The POC is feasible with browser-interface automation.
 
 ## Activation and scheduling
 
-- The user opens Google Chat and clicks the bookmarklet.
-- The injected overlay checks that the page is supported.
-- The user selects a local Chatbut configuration file, or approves the remembered file handle when Chrome still permits access.
+- The user opens or creates a local Chatbut configuration in the GitHub Pages configurator.
+- The user clicks the bookmarklet in Google Chat, and the injected overlay checks that the page is supported.
+- The paired bookmarklet opens a short-lived helper page on the configurator origin. The helper transfers a `SharedWorker` message port to the exact Google Chat opener, then closes.
+- The runtime requests the current configuration through that port. The worker relays only within the room named by the random pairing token embedded when the bookmark was installed, and each request also uses a fresh connection nonce.
+- Google Chat never prompts for the configuration file and does not persist the configuration in local storage. The configurator remains the only file owner and must stay open.
+- A reloaded Google Chat tab is no longer connected. Clicking the bookmarklet creates a fresh in-memory connection.
+- The user selects a local Chatbut configuration file in the configurator, or approves the remembered file handle when Chrome still permits access.
 - A stale or unavailable remembered handle is forgotten, after which the user can select or create a new configuration file.
 - Chrome does not expose an absolute local path to webpages. Show the file name and access status, plus a **Change file** action, rather than claiming to show the full filesystem path.
 - DeepSeek adaptation is optional. When enabled, the API key is loaded from the local plaintext configuration file and validated before the **Enable** control becomes available. Without AI, Chatbut sends the selected saved response unchanged.
@@ -111,7 +115,7 @@ Default circuit breakers:
 - Each vault supports multiple saved responses.
 - Randomly select one response from the applicable vault.
 - If a vault is empty, do not enable automation.
-- Templates remain editable from both the GitHub Pages setup screen and the injected overlay, with changes written back to the selected configuration file.
+- Templates remain editable from the GitHub Pages setup screen. Google Chat target changes made in the injected overlay are sent to the connected configurator and written back to the selected configuration file.
 
 ## DeepSeek integration
 
@@ -144,6 +148,7 @@ Default circuit breakers:
 - Debug mode is off by default.
 - When debug mode is enabled, require the user to select the folder containing the configuration file so Chrome can create rotating logs beside it.
 - Debug logs may contain full message context and DeepSeek request/response content, as approved for the POC, but must always redact the API key and authorization headers.
+- The Google Chat runtime sends debug records only through its paired message port. The configurator re-redacts each record and performs serialized file writes.
 - Append until a log reaches 10 MB, then create the next numbered log file.
 - Log technical state transitions, selector decisions, skip reasons, AI latency, fallback use, and send verification.
 
@@ -210,6 +215,8 @@ Default circuit breakers:
 - Produces no normal-operation history.
 - Produces debug logs only when explicitly enabled, redacts credentials, and rotates at 10 MB.
 - Preserves configuration through save/reopen flows and recovers cleanly from a stale file handle.
+- Never opens a file picker from Google Chat; an unconnected tab remains disabled with a recovery instruction.
+- Ignores bridge messages from an unexpected origin, window, pairing room, or connection nonce.
 - Landing page and overlay pass keyboard, contrast, reduced-motion, and responsive checks required by the selected design workflows.
 - Controlled live tests produce zero wrong-conversation sends.
 
@@ -219,6 +226,7 @@ Default circuit breakers:
 - Background-tab throttling can make randomized delays longer than configured.
 - Opening a conversation can mark it read.
 - Managed Chrome policies may block bookmarklets, local-file APIs, or DeepSeek network access.
+- Popup or opener policy changes can break the connected-tab bridge. Chatbut must remain disabled rather than fall back to untrusted configuration transport.
 - A plaintext configuration file and full debug logs are readable by anyone or any process with local access.
 - Sending corporate chat content to DeepSeek remains subject to each user's organizational policy, even though this POC has approval.
 - Public distribution can require ongoing selector maintenance and compatibility testing.

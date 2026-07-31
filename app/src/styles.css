@@ -57,7 +57,8 @@ button {
 button,
 .button,
 .nav-item,
-.app-footer a {
+.app-footer a,
+.app-footer__link {
   white-space: nowrap;
 }
 
@@ -241,17 +242,26 @@ ul {
   color: var(--color-paper);
 }
 
-.install-strip > div {
+.install-strip__copy {
   display: grid;
   gap: var(--space-2xs);
   min-width: 0;
 }
 
-.install-strip > div span,
+.install-strip__copy span,
 .install-strip__loading {
   color: var(--color-muted);
   font-size: var(--text-sm);
   line-height: 1.45;
+}
+
+.install-strip__actions {
+  display: grid;
+  gap: var(--space-xs);
+}
+
+.install-strip__actions .button {
+  min-width: 12.5rem;
 }
 
 .install-strip__button {
@@ -1391,14 +1401,19 @@ button.field-row:active {
   font-size: var(--text-xs);
 }
 
-.app-footer a {
+.app-footer a,
+.app-footer__link {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2xs);
   margin-inline-start: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--color-support);
   font-weight: 750;
   text-decoration: none;
+  cursor: pointer;
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -1622,6 +1637,7 @@ button.field-row:active {
   }
 
   .install-strip__button,
+  .install-strip__actions,
   .install-strip__loading,
   .remembered-file .button {
     grid-column: 1 / -1;
@@ -1715,7 +1731,8 @@ button.field-row:active {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .app-footer a {
+  .app-footer a,
+  .app-footer__link {
     margin-inline-start: 0;
   }
 }

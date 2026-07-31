@@ -48,6 +48,7 @@ import {
   validateConfig,
 } from "./config.js";
 import {
+  appendDebugLog,
   chooseDebugFolder,
   createConfigFile,
   forgetRememberedConfigHandle,
@@ -58,6 +59,12 @@ import {
   writeConfigFile,
 } from "./file-store.js";
 import { validateDeepSeekKey } from "./deepseek.js";
+import { redactLogValue } from "./bookmarklet/core.js";
+
+const GOOGLE_CHAT_URL = "https://chat.google.com/app/home";
+const PAIRING_TOKEN_KEY = "chatbut-pairing-token";
+const PAIRING_TOKEN_PLACEHOLDER = "__CHATBUT_PAIRING_TOKEN__";
+const BRIDGE_URL_PLACEHOLDER = "__CHATBUT_BRIDGE_URL__";
 
 const NAV_ITEMS = [
   { id: "window", label: "Window", Icon: Clock },
@@ -68,6 +75,27 @@ const NAV_ITEMS = [
 
 function makeDefaultConfig() {
   return normalizeConfig(DEFAULT_CONFIG);
+}
+
+function getOrCreatePairingToken() {
+  let existing = "";
+  try {
+    existing = localStorage.getItem(PAIRING_TOKEN_KEY) ?? "";
+  } catch {
+    // A session-only token still supports the current open configurator.
+  }
+  if (/^[A-Za-z0-9_-]{32,128}$/.test(existing ?? "")) return existing;
+  const bytes = crypto.getRandomValues(new Uint8Array(24));
+  const token = btoa(String.fromCharCode(...bytes))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replaceAll("=", "");
+  try {
+    localStorage.setItem(PAIRING_TOKEN_KEY, token);
+  } catch {
+    // Reinstalling the bookmark after a reload repairs session-only pairing.
+  }
+  return token;
 }
 
 function InlineNotice({ tone = "info", children }) {
@@ -356,6 +384,7 @@ function WindowPanel({
   keyStatus,
   setMessage,
   bookmarkletHref,
+  onOpenGoogleChat,
 }) {
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [editingDelay, setEditingDelay] = useState(false);
@@ -411,18 +440,28 @@ function WindowPanel({
           <span className="install-strip__icon">
             <BookmarkSimple size={25} weight="fill" aria-hidden="true" />
           </span>
-          <div>
-            <strong id="install-heading">Install once, start deliberately</strong>
-            <span>Drag this button to Chrome’s bookmarks bar. Click it only while Google Chat is open.</span>
+          <div className="install-strip__copy">
+            <strong id="install-heading">Install once, click in Chat</strong>
+            <span>Drag Chatbut once. Keep this page open with your configuration, then click the bookmark in Google Chat.</span>
           </div>
-          {bookmarkletHref ? (
-            <BookmarkletLink href={bookmarkletHref} />
-          ) : (
-            <span className="install-strip__loading">
-              <SpinnerGap className="spin" size={20} weight="bold" aria-hidden="true" />
-              Preparing bookmarklet
-            </span>
-          )}
+          <div className="install-strip__actions">
+            {bookmarkletHref ? (
+              <BookmarkletLink href={bookmarkletHref} />
+            ) : (
+              <span className="install-strip__loading">
+                <SpinnerGap className="spin" size={20} weight="bold" aria-hidden="true" />
+                Preparing bookmarklet
+              </span>
+            )}
+            <Button
+              icon={ArrowSquareOut}
+              tone="support"
+              onClick={onOpenGoogleChat}
+              disabled={!fileName}
+            >
+              Open Google Chat
+            </Button>
+          </div>
         </section>
 
         <div className="window-clock" aria-hidden="true">
@@ -995,6 +1034,16 @@ export function App() {
   const [message, setMessage] = useState(null);
   const [bookmarkletHref, setBookmarkletHref] = useState("");
   const [rememberedHandle, setRememberedHandle] = useState(null);
+  const [pairingToken] = useState(getOrCreatePairingToken);
+  const connectionNoncesRef = useRef(new Set());
+  const bridgePortRef = useRef(null);
+  const configRef = useRef(config);
+  const fileRecordRef = useRef(fileRecord);
+  const debugFolderRef = useRef(debugFolder);
+  const debugWriteQueueRef = useRef(Promise.resolve());
+  configRef.current = config;
+  fileRecordRef.current = fileRecord;
+  debugFolderRef.current = debugFolder;
 
   const validation = useMemo(() => validateConfig(config), [config]);
   const canEnable = Boolean(
@@ -1021,7 +1070,14 @@ export function App() {
         return response.text();
       })
       .then((value) => {
-        if (!cancelled) setBookmarkletHref(value.trim());
+        if (!cancelled) {
+          const bridgeUrl = new URL("./chatbut-bridge.html", window.location.href).href;
+          setBookmarkletHref(
+            value.trim()
+              .replace(PAIRING_TOKEN_PLACEHOLDER, pairingToken)
+              .replace(BRIDGE_URL_PLACEHOLDER, encodeURIComponent(bridgeUrl)),
+          );
+        }
       })
       .catch(() => {
         if (!cancelled) setMessage({ tone: "error", text: "The bookmarklet could not be prepared. Reload this page or check the deployment." });
@@ -1034,7 +1090,127 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [pairingToken]);
+
+  useEffect(() => {
+    if (typeof SharedWorker !== "function") {
+      setMessage({
+        tone: "error",
+        text: "This Chrome profile blocks the local tab bridge. Chatbut cannot connect safely.",
+      });
+      return undefined;
+    }
+
+    let worker;
+    try {
+      worker = new SharedWorker("./chatbut-bridge-worker.js", {
+        name: "chatbut-config-bridge",
+      });
+    } catch {
+      setMessage({
+        tone: "error",
+        text: "Chrome could not start the local tab bridge. Reload this page or review managed-browser policy.",
+      });
+      return undefined;
+    }
+    const port = worker.port;
+    bridgePortRef.current = port;
+    port.start();
+    port.postMessage({
+      type: "chatbut:register",
+      role: "configurator",
+      token: pairingToken,
+    });
+
+    async function handleBridgeMessage(event) {
+      const data = event.data;
+      if (!data || typeof data !== "object" || typeof data.type !== "string") return;
+
+      if (data.type === "chatbut:request-config") {
+        if (typeof data.nonce !== "string" || data.nonce.length < 8) return;
+        connectionNoncesRef.current.add(data.nonce);
+        if (connectionNoncesRef.current.size > 10) {
+          connectionNoncesRef.current.delete(connectionNoncesRef.current.values().next().value);
+        }
+        const record = fileRecordRef.current;
+        if (!record?.handle) {
+          port.postMessage({
+            type: "chatbut:error",
+            nonce: data.nonce,
+            message: "Return to Chatbut and open or create a configuration file first.",
+          });
+          return;
+        }
+        port.postMessage({
+          type: "chatbut:config",
+          nonce: data.nonce,
+          config: normalizeConfig(configRef.current),
+          fileName: record.name,
+          debugReady: !configRef.current.debug.enabled || Boolean(debugFolderRef.current),
+        });
+        setMessage({
+          tone: "info",
+          text: `${record.name} connected to Google Chat for this tab session. Nothing is stored on the Google Chat origin.`,
+        });
+        return;
+      }
+
+      if (!connectionNoncesRef.current.has(data.nonce)) return;
+      if (data.type === "chatbut:update-config") {
+        const record = fileRecordRef.current;
+        if (!record?.handle) return;
+        const nextConfig = normalizeConfig(data.config);
+        setConfigState(nextConfig);
+        configRef.current = nextConfig;
+        try {
+          await writeConfigFile(record.handle, nextConfig);
+          setDirty(false);
+          setMessage({ tone: "info", text: `Saved a Google Chat target change to ${record.name}.` });
+        } catch (error) {
+          setDirty(true);
+          setMessage({
+            tone: "error",
+            text: error instanceof Error ? error.message : "Could not save the Google Chat target change.",
+          });
+        }
+        return;
+      }
+
+      if (
+        data.type === "chatbut:debug"
+        && configRef.current.debug.enabled
+        && debugFolderRef.current
+      ) {
+        const entry = {
+          at: typeof data.at === "string" ? data.at : new Date().toISOString(),
+          event: String(data.event ?? "runtime").slice(0, 100),
+          details: redactLogValue(
+            data.details && typeof data.details === "object" ? data.details : {},
+            configRef.current.ai.apiKey,
+          ),
+        };
+        debugWriteQueueRef.current = debugWriteQueueRef.current
+          .then(() => appendDebugLog(
+            debugFolderRef.current,
+            entry,
+            configRef.current.debug.maximumLogBytes,
+          ))
+          .catch((error) => {
+            setMessage({
+              tone: "error",
+              text: error instanceof Error ? error.message : "Could not write the Chatbut debug log.",
+            });
+          });
+      }
+    }
+
+    port.addEventListener("message", handleBridgeMessage);
+    return () => {
+      port.removeEventListener("message", handleBridgeMessage);
+      port.close();
+      if (bridgePortRef.current === port) bridgePortRef.current = null;
+    };
+  }, [pairingToken]);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -1080,9 +1256,14 @@ export function App() {
       setConfigState(record.config);
       setDirty(false);
       setEnabled(false);
-      setKeyStatus("idle");
+      setKeyStatus(record.config.ai.enabled ? "idle" : "disabled");
       setDebugFolder(null);
-      setMessage({ tone: "info", text: `Loaded ${record.name}. Validate the DeepSeek key before enabling.` });
+      setMessage({
+        tone: "info",
+        text: record.config.ai.enabled
+          ? `Loaded ${record.name}. Validate the DeepSeek key before enabling.`
+          : `Loaded ${record.name}. Saved-response mode is ready.`,
+      });
     } catch (error) {
       if (error?.name !== "AbortError") {
         setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to open the configuration." });
@@ -1099,10 +1280,10 @@ export function App() {
       setConfigState(record.config);
       setDirty(false);
       setEnabled(false);
-      setKeyStatus("idle");
+      setKeyStatus(nextConfig.ai.enabled ? "idle" : "disabled");
       setDebugFolder(null);
-      setMessage({ tone: "info", text: `Created ${record.name}. Add and validate your DeepSeek key next.` });
-      setActiveSection("replies");
+      setMessage({ tone: "info", text: `Created ${record.name}. Review the settings, then open Google Chat.` });
+      setActiveSection("window");
     } catch (error) {
       if (error?.name !== "AbortError") {
         setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to create the configuration." });
@@ -1120,6 +1301,51 @@ export function App() {
       setMessage({ tone: "info", text: `Saved ${fileRecord.name} locally.` });
     } catch (error) {
       setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to save the configuration." });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleOpenGoogleChat() {
+    if (!fileRecord?.handle) {
+      setMessage({ tone: "warning", text: "Open or create a configuration file first." });
+      return;
+    }
+    if (!validation.valid) {
+      setMessage({ tone: "warning", text: validation.errors.join(" ") });
+      return;
+    }
+    if (config.debug.enabled && !debugFolder) {
+      setActiveSection("safety");
+      setMessage({ tone: "warning", text: "Choose the debug folder before opening Google Chat, or turn debug logging off." });
+      return;
+    }
+
+    const chatWindow = window.open(
+      GOOGLE_CHAT_URL,
+      "chatbut-google-chat",
+    );
+    if (!chatWindow) {
+      setMessage({ tone: "error", text: "Chrome blocked the Google Chat tab. Allow this site to open it, then try again." });
+      return;
+    }
+    chatWindow.focus();
+
+    try {
+      if (dirty) {
+        setSaving(true);
+        await writeConfigFile(fileRecord.handle, config);
+        setDirty(false);
+      }
+      setMessage({
+        tone: "info",
+        text: "Google Chat opened. Keep this configurator open, then click the Chatbut bookmark in Google Chat.",
+      });
+    } catch (error) {
+      setMessage({
+        tone: "error",
+        text: error instanceof Error ? error.message : "Could not save the configuration before connecting.",
+      });
     } finally {
       setSaving(false);
     }
@@ -1173,6 +1399,7 @@ export function App() {
             keyStatus={keyStatus}
             setMessage={setMessage}
             bookmarkletHref={bookmarkletHref}
+            onOpenGoogleChat={handleOpenGoogleChat}
           />
         ) : null}
         {activeSection === "people" ? (
@@ -1199,10 +1426,10 @@ export function App() {
       </main>
       <footer className="app-footer">
         <span>Chatbut · local-first proof of concept</span>
-        <span>Nothing runs until you click the bookmarklet.</span>
-        <a href="https://chat.google.com/app/home" target="_blank" rel="noreferrer">
+        <span>Keep this tab open while Chatbut runs.</span>
+        <button type="button" className="app-footer__link" onClick={handleOpenGoogleChat} disabled={!fileRecord}>
           Open Google Chat <ArrowSquareOut size={16} weight="bold" aria-hidden="true" />
-        </a>
+        </button>
       </footer>
     </div>
   );

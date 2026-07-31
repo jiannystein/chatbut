@@ -16,6 +16,9 @@ const CHANNEL_NAME = "chatbut-single-instance";
 const ROW_SELECTOR = '[role="listitem"][data-group-id]';
 const MAIN_SELECTOR = '[role="main"][data-group-id]';
 const MESSAGE_SELECTOR = '[role="group"][data-id][data-user-id]';
+const PAIRING_TOKEN = "__CHATBUT_PAIRING_TOKEN__";
+const BRIDGE_URL = "__CHATBUT_BRIDGE_URL__";
+const BRIDGE_ORIGIN = new URL(BRIDGE_URL).origin;
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function visible(element) {
@@ -124,38 +127,18 @@ function styleText() {
 `;
 }
 
-class DebugWriter {
-  constructor(folder, config) {
-    this.folder = folder;
+class BridgeDebugWriter {
+  constructor(send, config) {
+    this.send = send;
     this.config = config;
-    this.index = 1;
   }
 
   async write(event, details = {}) {
-    if (!this.folder) return;
-    try {
-      let handle;
-      let file;
-      do {
-        handle = await this.folder.getFileHandle(
-          `chatbut-debug-${String(this.index).padStart(3, "0")}.jsonl`,
-          { create: true },
-        );
-        file = await handle.getFile();
-        if (file.size >= this.config.debug.maximumLogBytes) this.index += 1;
-      } while (file.size >= this.config.debug.maximumLogBytes);
-      const line = `${JSON.stringify({
-        at: new Date().toISOString(),
-        event,
-        details: redactLogValue(details, this.config.ai.apiKey),
-      })}\n`;
-      const writable = await handle.createWritable({ keepExistingData: true });
-      await writable.seek(file.size);
-      await writable.write(line);
-      await writable.close();
-    } catch {
-      // Logging is diagnostic only and must never stop message monitoring.
-    }
+    this.send("chatbut:debug", {
+      at: new Date().toISOString(),
+      event,
+      details: redactLogValue(details, this.config.ai.apiKey),
+    });
   }
 }
 
@@ -163,7 +146,12 @@ class ChatbutRuntime {
   constructor() {
     this.root = null;
     this.config = null;
-    this.configHandle = null;
+    this.configName = "";
+    this.connectionNonce = "";
+    this.bridgeWindow = null;
+    this.bridgePort = null;
+    this.connectionTimeout = null;
+    this.debugReady = false;
     this.debug = null;
     this.enabled = false;
     this.enableAt = 0;
@@ -178,6 +166,90 @@ class ChatbutRuntime {
     this.channel = null;
     this.timer = null;
     this.busy = false;
+    this.handleWindowMessage = this.handleWindowMessage.bind(this);
+    this.handlePortMessage = this.handlePortMessage.bind(this);
+  }
+
+  handleWindowMessage(event) {
+    if (
+      event.origin !== BRIDGE_ORIGIN
+      || event.source !== this.bridgeWindow
+      || event.data?.nonce !== this.connectionNonce
+      || event.data?.type !== "chatbut:bridge-port"
+      || event.ports.length !== 1
+    ) return;
+    this.bridgePort = event.ports[0];
+    this.bridgePort.onmessage = this.handlePortMessage;
+    this.bridgePort.start();
+    this.requestConfig();
+  }
+
+  handlePortMessage(event) {
+    if (event.data?.nonce !== this.connectionNonce) return;
+    if (event.data.type === "chatbut:error") {
+      window.clearTimeout(this.connectionTimeout);
+      this.setStatus(String(event.data.message || "The configurator could not connect."));
+      return;
+    }
+    if (event.data.type !== "chatbut:config") return;
+    window.clearTimeout(this.connectionTimeout);
+    this.config = normalizeConfig(event.data.config);
+    this.configName = String(event.data.fileName || "local configuration");
+    this.debugReady = Boolean(event.data.debugReady);
+    this.debug = this.config.debug.enabled
+      ? new BridgeDebugWriter((type, payload) => this.sendBridge(type, payload), this.config)
+      : null;
+    this.root.querySelector('[data-role="enable"]').disabled = false;
+    this.root.querySelector('[data-role="connect"]').hidden = true;
+    this.setStatus(`Connected to ${this.configName}. Enable when ready.`, "ok");
+  }
+
+  requestConfig() {
+    this.bridgePort?.postMessage({
+      type: "chatbut:request-config",
+      nonce: this.connectionNonce,
+    });
+    window.clearTimeout(this.connectionTimeout);
+    this.connectionTimeout = window.setTimeout(() => {
+      if (!this.config) {
+        this.setStatus("No configurator replied. Keep Chatbut open, then retry.");
+      }
+    }, 6000);
+  }
+
+  connectToConfigurator() {
+    this.connectionNonce = globalThis.crypto?.randomUUID?.()
+      || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    this.config = null;
+    this.root.querySelector('[data-role="enable"]').disabled = true;
+    this.root.querySelector('[data-role="connect"]').hidden = false;
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(PAIRING_TOKEN)) {
+      this.setStatus("Bookmark not paired. Reinstall it from Chatbut.");
+      return;
+    }
+    if (this.bridgePort) {
+      this.setStatus("Refreshing configuration…");
+      this.requestConfig();
+      return;
+    }
+    this.setStatus("Requesting your configuration…");
+    this.bridgeWindow = window.open(
+      `${BRIDGE_URL}#${PAIRING_TOKEN}.${this.connectionNonce}`,
+      "chatbut-config-bridge",
+      "popup,width=440,height=260",
+    );
+    if (!this.bridgeWindow) {
+      this.setStatus("Chrome blocked the helper popup. Allow it, then retry.");
+    }
+  }
+
+  sendBridge(type, payload = {}) {
+    if (!this.bridgePort) return;
+    this.bridgePort.postMessage({
+      type,
+      nonce: this.connectionNonce,
+      ...payload,
+    });
   }
 
   boot() {
@@ -187,17 +259,20 @@ class ChatbutRuntime {
     }
     const existing = document.getElementById(ROOT_ID);
     if (existing) {
-      existing.hidden = !existing.hidden;
+      existing.hidden = false;
+      if (!existing.chatbutRuntime?.config) existing.chatbutRuntime?.connectToConfigurator();
       return;
     }
     this.render();
+    this.root.chatbutRuntime = this;
+    window.addEventListener("message", this.handleWindowMessage);
     this.channel = new BroadcastChannel(CHANNEL_NAME);
     this.channel.onmessage = (event) => {
       if (event.data === "enabled" && this.enabled) this.stop("Another Google Chat tab enabled Chatbut.");
       if (event.data === "probe" && this.enabled) this.channel.postMessage("enabled");
     };
     this.channel.postMessage("probe");
-    this.setStatus("Choose your local configuration file to begin.");
+    this.connectToConfigurator();
   }
 
   render() {
@@ -226,7 +301,8 @@ class ChatbutRuntime {
     status.dataset.role = "status";
     const actions = document.createElement("div");
     actions.className = "cb-actions";
-    const open = this.button("Choose file", () => this.openFile());
+    const connect = this.button("Retry connection", () => this.connectToConfigurator());
+    connect.dataset.role = "connect";
     const enable = this.button("Enable", () => this.enable());
     enable.className = "cb-primary";
     enable.dataset.role = "enable";
@@ -235,11 +311,11 @@ class ChatbutRuntime {
     stop.className = "cb-stop";
     stop.dataset.role = "stop";
     stop.hidden = true;
-    actions.append(open, enable, stop);
+    actions.append(connect, enable, stop);
     const search = document.createElement("div");
     search.className = "cb-search";
     const searchLabel = document.createElement("label");
-    searchLabel.textContent = "Find recent chats to allow or exclude";
+    searchLabel.textContent = "Find chats to allow or exclude";
     const input = document.createElement("input");
     input.type = "search";
     input.placeholder = "Search recent conversations";
@@ -249,7 +325,7 @@ class ChatbutRuntime {
     search.append(searchLabel, input, results);
     const note = document.createElement("p");
     note.className = "cb-mini";
-    note.textContent = "Runs only in this tab and stops on reload. No activity history is kept unless debug is enabled.";
+    note.textContent = "Keep Chatbut open.";
     main.append(status, actions, search, note);
     this.root.append(header, main);
     document.body.append(this.root);
@@ -272,27 +348,10 @@ class ChatbutRuntime {
     }
   }
 
-  async openFile() {
-    try {
-      const [handle] = await showOpenFilePicker({
-        multiple: false,
-        types: [{ description: "Chatbut configuration", accept: { "application/json": [".json", ".chatbut"] } }],
-      });
-      const file = await handle.getFile();
-      this.config = normalizeConfig(JSON.parse(await file.text()));
-      this.configHandle = handle;
-      this.root.querySelector('[data-role="enable"]').disabled = false;
-      this.setStatus(`Loaded ${file.name}. Enable only when the schedule is open.`, "ok");
-    } catch (error) {
-      if (error?.name !== "AbortError") this.setStatus(`Could not load the file: ${error.message}`);
-    }
-  }
-
   async saveConfig() {
-    if (!this.configHandle) return;
-    const writable = await this.configHandle.createWritable();
-    await writable.write(`${JSON.stringify(normalizeConfig(this.config), null, 2)}\n`);
-    await writable.close();
+    this.sendBridge("chatbut:update-config", {
+      config: normalizeConfig(this.config),
+    });
   }
 
   async enable() {
@@ -303,7 +362,7 @@ class ChatbutRuntime {
     }
     this.config = validation.config;
     if (!isScheduleActive(this.config)) {
-      this.setStatus("Outside the configured time. Review your schedule, then try again.");
+      this.setStatus("Outside your schedule. Review it and retry.");
       return;
     }
     try {
@@ -311,9 +370,8 @@ class ChatbutRuntime {
         this.setStatus("Checking the DeepSeek key…");
         await validateDeepSeekKey(this.config.ai.apiKey);
       }
-      if (this.config.debug.enabled) {
-        const folder = await showDirectoryPicker({ mode: "readwrite" });
-        this.debug = new DebugWriter(folder, this.config);
+      if (this.config.debug.enabled && !this.debugReady) {
+        throw new Error("Choose the debug folder in the configurator before enabling.");
       }
     } catch (error) {
       this.setStatus(`Enable stopped: ${error.message}`);
@@ -332,7 +390,7 @@ class ChatbutRuntime {
     this.root.querySelector('[data-role="stop"]').hidden = false;
     this.root.querySelector('[data-role="mode"]').textContent = "Enabled";
     this.channel?.postMessage("enabled");
-    this.setStatus("Enabled. Watching only messages that arrive from now on.", "ok");
+    this.setStatus("Enabled. Watching new messages only.", "ok");
     await this.debug?.write("enabled", { conversation: this.originalId });
     this.attachManualGuard();
     this.timer = setInterval(() => this.tick(), 3500);
@@ -484,7 +542,7 @@ class ChatbutRuntime {
     this.states.set(id, state);
     this.sent.push(sentAt);
     this.sessionCount += 1;
-    this.setStatus(`Sent ${vaultName === "vault1" ? "an acknowledgement" : "a follow-up"}. ${this.sessionCount}/20 this session.`, "ok");
+    this.setStatus(`Sent ${vaultName === "vault1" ? "acknowledgement" : "follow-up"}. ${this.sessionCount}/20.`, "ok");
     await this.debug?.write("sent", { id, triggerId, vaultName, fallback, reply });
     if (previousId) await navigateTo(previousId);
   }
@@ -577,7 +635,7 @@ class ChatbutRuntime {
     for (const row of ranked) {
       const button = this.button(row.label, async () => {
         if (!this.config) {
-          this.setStatus("Choose a configuration file first.");
+          this.setStatus("Connect Chatbut first.");
           return;
         }
         const kind = conversationKind(row.id);
@@ -587,10 +645,10 @@ class ChatbutRuntime {
         const existing = list.findIndex((item) => item.id === row.id);
         if (existing >= 0) {
           list.splice(existing, 1);
-          this.setStatus(`Removed ${row.label} from the ${kind === "space" ? "Space allowlist" : "DM exclusion list"}.`, "ok");
+          this.setStatus(`Removed ${row.label} from ${kind === "space" ? "Spaces" : "DM exclusions"}.`, "ok");
         } else {
           list.push({ id: row.id, label: row.label });
-          this.setStatus(`Added ${row.label} to the ${kind === "space" ? "Space allowlist" : "DM exclusion list"}.`, "ok");
+          this.setStatus(`Added ${row.label} to ${kind === "space" ? "Spaces" : "DM exclusions"}.`, "ok");
         }
         await this.saveConfig();
         this.renderSearch(query, container);
