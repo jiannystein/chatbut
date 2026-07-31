@@ -1,4 +1,9 @@
-import { isRuntimeScheduleActive, validateRuntimeConfig } from "./runtime-config.js";
+import {
+  formatRuntimeCountdown,
+  isRuntimeScheduleActive,
+  nextRuntimeWindowStart,
+  validateRuntimeConfig,
+} from "./runtime-config.js";
 import {
   classifyConversation,
   isTargetAllowed,
@@ -12,6 +17,7 @@ import {
   redactLogValue,
   selectVault,
 } from "./core.js";
+import { isNewerRelease, RELEASE_VERSION } from "../release.js";
 
 const ROOT_ID = "chatbut-runtime";
 const CHANNEL_NAME = "chatbut-single-instance";
@@ -148,19 +154,7 @@ async function navigateTo(id) {
 }
 
 function styleText() {
-  return `
-#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:min(320px,calc(100vw - 24px));font:14px/1.45 system-ui,-apple-system,sans-serif;color:#191713;background:#fffaf0;border:1px solid #d5cbbb;border-radius:14px;box-shadow:0 14px 42px #0003;overflow:hidden}
-#${ROOT_ID} *{box-sizing:border-box}#${ROOT_ID} header{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#1d1b18;color:#fffaf0}
-#${ROOT_ID} header strong{font:700 19px/1.1 Georgia,serif}#${ROOT_ID} header span{margin-left:auto;color:#d8d1c5;font-size:12px;font-weight:700}
-#${ROOT_ID} main{display:grid;gap:11px;padding:14px}#${ROOT_ID} p{margin:0;color:#625c52}#${ROOT_ID} .cb-status{min-height:40px;padding:9px 10px;border-left:3px solid #b94f25;background:#f7eee3}
-#${ROOT_ID} .cb-status[data-tone="ok"]{border-color:#287459;background:#e8f2ec}#${ROOT_ID} .cb-actions{display:grid;grid-template-columns:1fr;gap:8px}
-#${ROOT_ID} button{font:inherit;min-height:40px;padding:0 13px;border:1px solid #bcb1a0;border-radius:8px;background:#fffaf0;color:#191713;font-weight:750;cursor:pointer}
-#${ROOT_ID} button.cb-primary{border-color:#b94f25;background:#b94f25;color:white}#${ROOT_ID} button.cb-stop{border-color:#287459;background:#287459;color:white}
-#${ROOT_ID} button:disabled{opacity:.5;cursor:not-allowed}#${ROOT_ID} .cb-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0;border-block:1px solid #ddd3c5}
-#${ROOT_ID} .cb-metrics div{display:grid;gap:2px;padding:9px 7px}#${ROOT_ID} .cb-metrics div+div{border-left:1px solid #ddd3c5}
-#${ROOT_ID} .cb-metrics dt{color:#746c61;font-size:11px}#${ROOT_ID} .cb-metrics dd{margin:0;color:#191713;font-size:17px;font-weight:750;font-variant-numeric:tabular-nums}
-#${ROOT_ID} .cb-mini{font-size:12px;color:#746c61}#${ROOT_ID} .cb-close{margin-left:0;padding:0;width:32px;min-height:32px;border-color:#655f56;background:transparent;color:white}
-`;
+  return `#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:296px;max-width:calc(100% - 24px);font:14px/1.4 Arial,sans-serif;color:#191713;background:#fffaf0;border:1px solid #d5cbbb;border-radius:10px;box-shadow:0 12px 30px #0003;overflow:hidden}#${ROOT_ID} *{box-sizing:border-box}#${ROOT_ID} header{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1d1b18;color:#fffaf0}#${ROOT_ID} header strong{font:700 18px Georgia,serif}#${ROOT_ID} header span{margin-left:auto;color:#d8d1c5;font-size:12px}#${ROOT_ID} main{display:grid;gap:9px;padding:12px}#${ROOT_ID} p{margin:0;color:#625c52}#${ROOT_ID} .cb-status{padding:8px;border-left:3px solid #b94f25;background:#f7eee3}#${ROOT_ID} [data-tone=ok]{border-color:#287459;background:#e8f2ec}#${ROOT_ID} .cb-actions{display:flex;gap:6px}#${ROOT_ID} .cb-actions button{flex:1}#${ROOT_ID} button{font:inherit;min-height:38px;padding:0 10px;border:1px solid #bcb1a0;border-radius:6px;background:#fffaf0;color:#191713;font-weight:700;cursor:pointer}#${ROOT_ID} .cb-primary{background:#b94f25;color:white}#${ROOT_ID} .cb-stop{background:#287459;color:white}#${ROOT_ID} button:disabled{opacity:.55;cursor:not-allowed}#${ROOT_ID} .cb-metrics{display:grid;grid-template-columns:repeat(3,1fr);margin:0;border-block:1px solid #ddd3c5}#${ROOT_ID} .cb-metrics div{padding:7px 5px}#${ROOT_ID} .cb-metrics div+div{border-left:1px solid #ddd3c5}#${ROOT_ID} dt,.cb-mini{color:#746c61;font-size:11px}#${ROOT_ID} dd{margin:0;font-size:17px;font-weight:700}#${ROOT_ID} .cb-release[data-tone=warn]{color:#9f2e24;font-weight:700}#${ROOT_ID} .cb-close{padding:0;width:30px;min-height:30px;background:transparent;color:white}`;
 }
 
 class BridgeDebugWriter {
@@ -207,6 +201,10 @@ class ChatbutRuntime {
     this.selfEmail = "";
     this.channel = null;
     this.timer = null;
+    this.countdownTimer = null;
+    this.waitingForSchedule = false;
+    this.activating = false;
+    this.latestRelease = "";
     this.busy = false;
     this.sending = false;
     this.sendChain = Promise.resolve();
@@ -231,7 +229,11 @@ class ChatbutRuntime {
   handlePortMessage(event) {
     if (event.data?.type === "chatbut:config-changed" && event.data.config) {
       this.config = event.data.config;
+      this.debug = this.config.debug.enabled
+        ? new BridgeDebugWriter((type, payload) => this.sendBridge(type, payload), this.config)
+        : null;
       this.syncConversationIndex();
+      if (!this.enabled && !this.root.hidden) this.armSchedule();
       return;
     }
     if (event.data?.nonce !== this.connectionNonce) return;
@@ -255,14 +257,16 @@ class ChatbutRuntime {
     if (event.data.type !== "chatbut:config") return;
     window.clearTimeout(this.connectionTimeout);
     this.config = event.data.config;
+    this.latestRelease = String(event.data["latestRelease"] || "");
     const configName = String(event.data.fileName || "local configuration");
     this.debug = this.config.debug.enabled
       ? new BridgeDebugWriter((type, payload) => this.sendBridge(type, payload), this.config)
       : null;
-    this.root.querySelector('[data-role="enable"]').disabled = false;
     this.root.querySelector('[data-role="connect"]').hidden = true;
-    this.setStatus(`Connected to ${configName}. Enable when ready.`, "ok");
+    this.updateReleaseState();
+    this.setStatus(`Connected to ${configName}.`, "ok");
     this.syncConversationIndex();
+    this.armSchedule();
   }
 
   requestBridge(type, payload, successTypes, timeoutMs = 45_000) {
@@ -337,7 +341,9 @@ class ChatbutRuntime {
     const existing = document.getElementById(ROOT_ID);
     if (existing) {
       existing.hidden = false;
-      if (!existing.chatbutRuntime?.config) existing.chatbutRuntime?.connectToConfigurator();
+      const runtime = existing.chatbutRuntime;
+      if (!runtime?.config) runtime?.connectToConfigurator();
+      else if (!runtime.enabled) runtime.armSchedule();
       return;
     }
     if (!window.confirm(
@@ -366,7 +372,7 @@ class ChatbutRuntime {
     this.root.setAttribute("aria-label", "Chatbut controls");
     const header = document.createElement("header");
     const title = document.createElement("strong");
-    title.textContent = "Chatbut";
+    title.textContent = `Chatbut v${RELEASE_VERSION}`;
     const mode = document.createElement("span");
     mode.textContent = "Disabled";
     mode.dataset.role = "mode";
@@ -375,7 +381,10 @@ class ChatbutRuntime {
     close.className = "cb-close";
     close.textContent = "×";
     close.setAttribute("aria-label", "Hide Chatbut");
-    close.addEventListener("click", () => { this.root.hidden = true; });
+    close.addEventListener("click", () => {
+      if (!this.enabled) this.cancelScheduleWait();
+      this.root.hidden = true;
+    });
     header.append(title, mode, close);
     const main = document.createElement("main");
     const status = document.createElement("p");
@@ -385,15 +394,18 @@ class ChatbutRuntime {
     actions.className = "cb-actions";
     const connect = this.button("Retry connection", () => this.connectToConfigurator());
     connect.dataset.role = "connect";
-    const enable = this.button("Enable", () => this.enable());
+    const enable = this.button("Enable", () => this.enableNow());
     enable.className = "cb-primary";
     enable.dataset.role = "enable";
     enable.disabled = true;
+    const override = this.button("Enable now", () => this.enableNow());
+    override.dataset.role = "override";
+    override.hidden = true;
     const stop = this.button("Stop", () => this.stop("Stopped by you."));
     stop.className = "cb-stop";
     stop.dataset.role = "stop";
     stop.hidden = true;
-    actions.append(connect, enable, stop);
+    actions.append(connect, enable, override, stop);
     const metrics = document.createElement("dl");
     metrics.className = "cb-metrics";
     for (const [role, label] of [["replies", "Replies"], ["chats", "Chats"], ["pending", "Pending"]]) {
@@ -409,7 +421,10 @@ class ChatbutRuntime {
     const note = document.createElement("p");
     note.className = "cb-mini";
     note.textContent = "Only new eligible messages · session safety limit 20";
-    main.append(status, metrics, actions, note);
+    const release = document.createElement("p");
+    release.className = "cb-mini cb-release";
+    release.dataset.role = "release";
+    main.append(status, metrics, actions, note, release);
     this.root.append(header, main);
     document.body.append(this.root);
     this.updateMetrics();
@@ -441,6 +456,74 @@ class ChatbutRuntime {
       const node = this.root?.querySelector(`[data-role="metric-${role}"]`);
       if (node) node.textContent = String(value);
     }
+  }
+
+  updateReleaseState() {
+    const node = this.root?.querySelector('[data-role="release"]');
+    if (!node) return;
+    if (isNewerRelease(this.latestRelease, RELEASE_VERSION)) {
+      node.textContent = `Update available · installed v${RELEASE_VERSION}, latest v${this.latestRelease}. Replace the bookmark.`;
+      node.dataset.tone = "warn";
+    } else {
+      node.textContent = `Installed bookmark v${RELEASE_VERSION}`;
+      delete node.dataset.tone;
+    }
+  }
+
+  cancelScheduleWait() {
+    clearInterval(this.countdownTimer);
+    this.countdownTimer = null;
+    this.waitingForSchedule = false;
+    const enable = this.root?.querySelector('[data-role="enable"]');
+    const override = this.root?.querySelector('[data-role="override"]');
+    if (enable) {
+      enable.textContent = "Enable";
+      enable.disabled = !this.config;
+      enable.hidden = false;
+    }
+    if (override) override.hidden = true;
+    if (!this.enabled) {
+      const mode = this.root?.querySelector('[data-role="mode"]');
+      if (mode) mode.textContent = "Disabled";
+    }
+  }
+
+  armSchedule() {
+    const wasWaiting = this.waitingForSchedule;
+    this.cancelScheduleWait();
+    if (!this.config || this.enabled) return;
+    if (isRuntimeScheduleActive(this.config)) {
+      if (wasWaiting) {
+        this.activate(false);
+        return;
+      }
+      this.setStatus("Schedule is open. Enable when ready.", "ok");
+      return;
+    }
+    const next = nextRuntimeWindowStart(this.config);
+    const enable = this.root.querySelector('[data-role="enable"]');
+    const override = this.root.querySelector('[data-role="override"]');
+    if (!next) {
+      enable.disabled = true;
+      this.setStatus("No upcoming window was found. Review the schedule in Chatbut.");
+      return;
+    }
+    this.waitingForSchedule = true;
+    enable.disabled = true;
+    override.hidden = false;
+    this.root.querySelector('[data-role="mode"]').textContent = "Waiting";
+    this.setStatus("Waiting for the next window. Leave this tab open, or close the widget to cancel.");
+    const update = () => {
+      if (!this.waitingForSchedule || this.enabled) return;
+      if (isRuntimeScheduleActive(this.config)) {
+        this.cancelScheduleWait();
+        this.activate(false);
+        return;
+      }
+      enable.textContent = `Starts in ${formatRuntimeCountdown(next - Date.now())}`;
+    };
+    update();
+    this.countdownTimer = setInterval(update, 1_000);
   }
 
   async saveConfig() {
@@ -478,7 +561,7 @@ class ChatbutRuntime {
     await this.saveConfig();
   }
 
-  async enable() {
+  async enableNow() {
     const validation = validateRuntimeConfig(this.config);
     if (!validation.valid) {
       this.setStatus(validation.errors.join(" "));
@@ -486,15 +569,29 @@ class ChatbutRuntime {
     }
     this.config = validation.config;
     this.selfEmail = signedInEmail();
-    if (!isRuntimeScheduleActive(this.config)) {
+    const outsideSchedule = !isRuntimeScheduleActive(this.config);
+    if (outsideSchedule) {
       if (!window.confirm("You are outside the configured schedule. Enable anyway until you stop Chatbut or reload this page?")) {
-        this.setStatus("Stayed disabled. Review the schedule or enable again to use a one-session override.");
+        this.armSchedule();
         return;
       }
-      this.scheduleOverride = true;
-    } else {
-      this.scheduleOverride = false;
     }
+    await this.activate(outsideSchedule);
+  }
+
+  async activate(scheduleOverride) {
+    if (this.enabled || this.activating) return;
+    const validation = validateRuntimeConfig(this.config);
+    if (!validation.valid) {
+      this.setStatus(validation.errors.join(" "));
+      return;
+    }
+    this.config = validation.config;
+    if (!scheduleOverride && !isRuntimeScheduleActive(this.config)) {
+      this.armSchedule();
+      return;
+    }
+    this.activating = true;
     try {
       if (this.config.llm.enabled) {
         this.setStatus("Checking the active LLM connection…");
@@ -510,9 +607,13 @@ class ChatbutRuntime {
       }
     } catch (error) {
       this.setStatus(`Enable stopped: ${error.message}`);
+      this.activating = false;
       return;
     }
+    this.cancelScheduleWait();
+    this.scheduleOverride = scheduleOverride;
     this.enabled = true;
+    this.activating = false;
     this.enableAt = Date.now();
     this.originalId = currentConversation()?.id || "";
     this.baseline = new Map(recentRows().map((row) => [row.id, row.timestamp]));
@@ -543,6 +644,8 @@ class ChatbutRuntime {
   stop(reason) {
     this.enabled = false;
     this.scheduleOverride = false;
+    this.activating = false;
+    this.cancelScheduleWait();
     clearInterval(this.timer);
     for (const timeout of this.pending.values()) clearTimeout(timeout);
     this.pending.clear();

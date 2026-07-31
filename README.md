@@ -38,28 +38,48 @@ test conversations.
 A bookmarklet is a browser bookmark that contains a small program. Chatbut
 requires no extension, installer, Google OAuth consent, Chat app, hosted
 account, or background service. The user must deliberately click the bookmark
-and enable each session.
+for each session, then enable immediately or leave that tab waiting for the
+next scheduled window.
 
 The trade-off is equally deliberate: Google Chat must remain open, the computer
 must stay awake, and Google interface changes can require Chatbut updates.
 
-## MVP features
+## Features
 
-| Area | Tested behavior |
-| --- | --- |
-| Schedule | Up to 8 recurring time windows on selected days, including overnight windows, in the browser's timezone |
-| Manual override | Warn and allow one-session enable outside the schedule; stop at reload or explicit Stop |
-| 1:1 direct messages | Everyone except conversations on the exclusion list |
-| Multi-person DMs | Everyone except exclusions, but only for a verified `@mention` or direct reply |
-| Spaces | Selected Spaces only, and only for a verified `@mention` or direct reply |
-| First reply | Non-repeating Vault 1 template after a configurable 1–60 second delay; default 5–10 seconds |
-| Follow-up | At most one Vault 2 reply after a 1–5 minute cooldown and another eligible message; default 1 minute |
-| LLM adaptation | Optional BYOK connections for DeepSeek, OpenAI, Claude, Kimi Global, or Kimi China |
-| Provider safety | Model discovery plus a tiny completion test before a connection is saved; one active provider at a time |
-| Invitations | Separate, off-by-default controls for human 1:1 requests and Space invitations |
-| Storage | Versioned browser-local configuration with explicit JSON import/export |
-| Logging | Off by default; optional browser-local debug log, rotated at 10 MB and exportable on demand |
-| Safety | New messages only, one active instance, send limits, re-verification before every send, immediate Stop |
+- Schedule up to eight recurring time windows on selected days, including
+  overnight windows, using the browser's timezone.
+- Click before a window to see a one-shot **Starts in HH:MM:SS** countdown.
+  Chatbut enables when that window opens while the same tab remains open.
+- Use **Enable now** outside the schedule after an explicit one-session
+  warning, or stop immediately at any time.
+- Cover every 1:1 direct message except saved exclusions.
+- Cover multi-person DMs except exclusions only when the message contains a
+  verified `@mention` or direct reply.
+- Opt individual Spaces in; selected Spaces still require a verified
+  `@mention` or direct reply.
+- Randomly choose a non-repeating first acknowledgement after a configurable
+  1–60 second delay, default 5–10 seconds.
+- Allow at most one follow-up after a configurable 1–5 minute wait and another
+  eligible message, default 1 minute. Waiting by itself never sends a reply.
+- Store a versioned configuration in this Chrome profile with explicit JSON
+  import, validation, recovery guidance, and export.
+- Keep debug logging off by default; when enabled, rotate the browser-local log
+  at 10 MB and export it only on request.
+- Enforce new-message baselines, one active instance, send limits, target and
+  composer re-verification, non-repeating templates, and immediate Stop.
+- Show the release on the configurator, bookmark name, and live widget. A
+  non-blocking update notice tells the user when to replace the bookmark.
+
+### Optional features not fully live-tested
+
+- **LLM adaptation:** BYOK connections for DeepSeek, OpenAI, Claude, Kimi
+  Global, and Kimi China include model discovery, a minimal validation request,
+  one active provider, and saved-response fallback. The bridge and provider
+  paths have automated coverage, but end-to-end live adaptation has not been
+  accepted with every provider.
+- **Invitation automation:** separate, off-by-default controls can accept a
+  human 1:1 request or a Space invitation. Their fail-closed DOM paths have
+  automated coverage but have not completed the full live acceptance matrix.
 
 Chatbut never answers the substance of a message. With LLM adaptation enabled,
 the selected saved response remains the intent: the provider may adapt its
@@ -75,25 +95,28 @@ Chatbut sends the original saved response.
    already have one.
 3. Review the schedule, people, reply vaults, and safety settings. The default
    window is Monday–Friday, 06:00–08:00 in the browser's timezone.
-4. Drag the orange **💬 Chatbut** button into Chrome's bookmarks bar once.
+4. Drag the orange **💬 Chatbut v0.2.0** button into Chrome's bookmarks bar
+   once.
 5. Select **Open Google Chat**, or use an existing
    `https://chat.google.com/app/home` tab.
 6. While on the Google Chat page, click the **💬 Chatbut** bookmark. The tab
    asks for confirmation, becomes the dedicated automation tab, and opens a
    clean Google Chat tab for normal use. Leave the original automation tab
    open.
-7. In the dedicated automation tab, review the compact status panel and select
-   **Enable**.
+7. In the dedicated automation tab, review the compact status panel. Select
+   **Enable** while the window is open. Before a window, leave the countdown
+   running or select **Enable now** and confirm the override.
 
 Setting changes save locally and reach the connected bookmark automatically.
-Re-add the bookmark only after Chatbut itself is updated. Invalid or incomplete
+Re-add the bookmark only when the version shown on this page is newer than the
+version in the bookmark name or live widget. Invalid or incomplete
 JSON backups are rejected before they can replace local state; Chatbut offers
 to export a clean replacement, while the bad disk file must be deleted
 manually.
 
 Chrome controls the globe icon used for JavaScript bookmarks. If the bookmark
 bar hides Chatbut's label, right-click the bookmark, select **Edit**, and set
-the name to **💬 Chatbut**.
+the name to **💬 Chatbut v0.2.0**.
 
 The configurator may be closed after the bookmark connects. Chatbut remains
 disabled after Google Chat reloads, Chrome restarts, or the tab closes; click
@@ -195,9 +218,9 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 
 ## Verification
 
-The current production build passed 40 runtime, configuration, targeting,
+The current release passed 43 runtime, configuration, targeting,
 provider, and bridge tests plus 4 hosting/package tests on 2026-07-31. Its
-encoded bookmarklet is exactly 32,768 bytes, the enforced distribution limit.
+encoded bookmarklet is 30,440 bytes against the enforced 32,768-byte limit.
 
 Coordinated desktop-Chrome acceptance confirmed first replies in independent
 1:1 conversations, a post-cooldown second reply, and suppression of immediate
@@ -206,9 +229,15 @@ verified `@mentions` produced both the first and post-cooldown replies, while
 an immediate eligible follow-up was suppressed. Every successful reply was
 sent as an ordinary message from the signed-in account.
 
+## Next platform
+
+Microsoft Teams web app is the next platform workstream. It will require a
+separate DOM adapter and its own live acceptance matrix; Teams support is not
+included in this Google Chat release.
+
 ## Limitations
 
-- Chrome desktop only for the MVP.
+- Chrome desktop only for the current release.
 - Google Chat must remain open and the computer awake.
 - Managed-browser policy may block bookmarklets, helper tabs, SharedWorker,
   IndexedDB, or provider network access.
@@ -218,7 +247,7 @@ sent as an ordinary message from the signed-in account.
 - Invitation discovery currently targets the English Google Chat interface.
 - Chrome does not expose a normal filesystem path for browser-local storage.
   JSON export is the explicit backup and transfer path.
-- Microsoft Teams is not implemented yet.
+- Microsoft Teams is planned next but is not implemented yet.
 
 ## Local development
 

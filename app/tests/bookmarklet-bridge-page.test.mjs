@@ -32,6 +32,7 @@ function runBridge(mode = "") {
       close() { calls.close += 1; },
       setTimeout(callback) { callback(); },
     },
+    CHATBUT_RELEASE_VERSION: "0.2.0",
   };
   vm.runInNewContext(source, context);
   return { calls, status };
@@ -43,6 +44,7 @@ test("handoff bridge becomes a clean Google Chat tab after transferring the port
   assert.equal(calls.replace[0], "https://chat.google.com/app/home");
   assert.equal(calls.close, 0);
   assert.match(status.textContent, /Opening a clean Google Chat tab/i);
+  assert.equal(calls.workerMessages[0].releaseVersion, "0.2.0");
 });
 
 test("legacy bridge still closes after transferring the port", () => {

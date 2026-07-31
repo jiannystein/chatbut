@@ -59,6 +59,7 @@ import {
   saveLocalConfig,
 } from "./file-store.js";
 import { fuzzyScore, normalizeConversationLabel } from "./bookmarklet/core.js";
+import { RELEASE_VERSION } from "./release.js";
 
 const GOOGLE_CHAT_URL = "https://chat.google.com/app/home";
 const PAIRING_TOKEN_KEY = "chatbut-pairing-token";
@@ -190,10 +191,10 @@ function BookmarkletLink({ href, disabled = false }) {
         }
       }}
       draggable={disabled ? "false" : "true"}
-      aria-label={disabled ? "Chatbut bookmark unavailable" : "💬 Chatbut bookmark"}
-      title={disabled ? "Create or import a configuration first" : "💬 Chatbut"}
+      aria-label={disabled ? "Chatbut bookmark unavailable" : `💬 Chatbut v${RELEASE_VERSION} bookmark`}
+      title={disabled ? "Create or import a configuration first" : `💬 Chatbut v${RELEASE_VERSION}`}
     >
-      💬 Chatbut
+      💬 Chatbut v{RELEASE_VERSION}
     </a>
   );
 }
@@ -226,6 +227,7 @@ function AppHeader({ configured, saveStatus, onImport, onCreate, onExport }) {
       <div className="brand" aria-label="Chatbut">
         <img src="./assets/chatbut-mark.png" alt="" width="48" height="48" />
         <span>Chatbut</span>
+        <small>v{RELEASE_VERSION}</small>
       </div>
       <div className="masthead__file">
         <Database size={20} weight="regular" aria-hidden="true" />
@@ -409,7 +411,7 @@ function OverlayPreview({ nextWindow, scheduleLabel, withinSchedule }) {
       </div>
       <div className="overlay-panel" aria-disabled="true">
         <div className="overlay-panel__header">
-          <strong>Chatbut</strong>
+          <strong>Chatbut v{RELEASE_VERSION}</strong>
           <span>Disabled</span>
         </div>
         <p className="overlay-panel__status">Ready in the dedicated automation tab.</p>
@@ -440,6 +442,7 @@ function WindowPanel({
 }) {
   const [editingSchedule, setEditingSchedule] = useState(false);
   const [editingDelay, setEditingDelay] = useState(false);
+  const [editingFollowUp, setEditingFollowUp] = useState(false);
   const activeNow = isScheduleActive(config);
   const scheduleLabel = formatSchedule(config);
 
@@ -483,7 +486,7 @@ function WindowPanel({
           <div className="install-strip__copy">
             <strong id="install-heading">Install once, click in Chat</strong>
             <span>Drag 💬 Chatbut to the Chrome bookmarks bar. Click it in Google Chat: that tab becomes the automation tab, and a second clean Chat tab opens for you.</span>
-            <small>If Chrome shows only a globe, right-click the bookmark, choose Edit, and set its name to 💬 Chatbut.</small>
+            <small>Chrome may show a globe; the saved name should read 💬 Chatbut v{RELEASE_VERSION}. When this page shows a newer version, remove the old bookmark and drag this button again.</small>
           </div>
           <div className="install-strip__actions">
             {bookmarkletHref ? (
@@ -584,13 +587,13 @@ function WindowPanel({
           />
           <FieldRow
             Icon={Clock}
-            label={`Follow-up after ${config.delays.followUpMinutes} min`}
+            label="Follow-up response"
             value={`Vault 2 · ${config.responses.vault2.length} responses`}
             onClick={() => setActiveSection("replies")}
           />
           <FieldRow
             Icon={HourglassMedium}
-            label="Reply delay"
+            label="First reply delay"
             value={`${config.delays.minimumSeconds}–${config.delays.maximumSeconds} sec`}
             onClick={() => setEditingDelay((current) => !current)}
           />
@@ -617,6 +620,30 @@ function WindowPanel({
                   onChange={(event) => updateDelay("maximumSeconds", event.target.value)}
                 />
               </label>
+            </div>
+          ) : null}
+          <FieldRow
+            Icon={Clock}
+            label="Follow-up availability"
+            value={`${config.delays.followUpMinutes} ${config.delays.followUpMinutes === 1 ? "minute" : "minutes"} after the first reply`}
+            onClick={() => setEditingFollowUp((current) => !current)}
+          />
+          {editingFollowUp ? (
+            <div className="follow-up-editor">
+              <label>
+                <span>Minutes before Vault 2 can reply</span>
+                <span className="input-suffix">
+                  <input
+                    type="number"
+                    min="1"
+                    max="5"
+                    value={config.delays.followUpMinutes}
+                    onChange={(event) => updateDelay("followUpMinutes", event.target.value)}
+                  />
+                  <span>minutes</span>
+                </span>
+              </label>
+              <p>A follow-up still needs another eligible message. Waiting alone never sends one.</p>
             </div>
           ) : null}
         </div>
@@ -1106,7 +1133,7 @@ function RepliesPanel({
         />
         <VaultEditor
           title="Vault 2"
-          description={`One follow-up after ${config.delays.followUpMinutes} minutes and a new eligible message.`}
+          description={`One follow-up after ${config.delays.followUpMinutes} ${config.delays.followUpMinutes === 1 ? "minute" : "minutes"} and a new eligible message.`}
           items={config.responses.vault2}
           onChange={(vault2) => setConfig((current) => ({
             ...current,
@@ -1115,22 +1142,6 @@ function RepliesPanel({
         />
       </div>
 
-      <label className="cooldown-field">
-        <span>Vault 2 cooldown</span>
-        <span className="input-suffix">
-          <input
-            type="number"
-            min="1"
-            max="5"
-            value={config.delays.followUpMinutes}
-            onChange={(event) => setConfig((current) => ({
-              ...current,
-              delays: { ...current.delays, followUpMinutes: Number(event.target.value) },
-            }))}
-          />
-          <span>minutes</span>
-        </span>
-      </label>
     </section>
   );
 }
@@ -1300,7 +1311,7 @@ export function App() {
 
   const validation = useMemo(() => validateConfig(config), [config]);
   function showSavedToast() {
-    setToast("Saved locally. Setting changes sync automatically; re-add the bookmark only after a Chatbut version update.");
+    setToast(`Saved locally. Settings sync automatically. Your bookmark should show v${RELEASE_VERSION}; replace it only when this page shows a newer version.`);
   }
 
   function setConfig(updater) {
@@ -1381,6 +1392,7 @@ export function App() {
       type: "chatbut:register",
       role: "configurator",
       token: pairingToken,
+      releaseVersion: RELEASE_VERSION,
     });
 
     function handleBridgeMessage(event) {
@@ -1646,7 +1658,7 @@ export function App() {
         ) : null}
       </main>
       <footer className="app-footer">
-        <span>Chatbut · local-first proof of concept</span>
+        <span>Chatbut v{RELEASE_VERSION} · local-first proof of concept</span>
         <span>Configuration and optional logs stay in this Chrome profile.</span>
         <button type="button" className="app-footer__link" onClick={handleOpenGoogleChat} disabled={!configured}>
           Open Google Chat <ArrowSquareOut size={16} weight="bold" aria-hidden="true" />
