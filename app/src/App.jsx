@@ -187,16 +187,13 @@ function BookmarkletLink({ href, disabled = false }) {
       onDragStart={(event) => {
         if (disabled) {
           event.preventDefault();
-          return;
         }
-        event.dataTransfer.setData("text/uri-list", href);
-        event.dataTransfer.setData("text/plain", href);
       }}
       draggable={disabled ? "false" : "true"}
-      title={disabled ? "Create or import a configuration first" : "Drag this button to the Chrome bookmarks bar"}
+      aria-label={disabled ? "Chatbut bookmark unavailable" : "💬 Chatbut bookmark"}
+      title={disabled ? "Create or import a configuration first" : "💬 Chatbut"}
     >
-      <span aria-hidden="true">💬</span>
-      <span>Chatbut</span>
+      💬 Chatbut
     </a>
   );
 }
@@ -486,6 +483,7 @@ function WindowPanel({
           <div className="install-strip__copy">
             <strong id="install-heading">Install once, click in Chat</strong>
             <span>Drag 💬 Chatbut to the Chrome bookmarks bar. Click it in Google Chat: that tab becomes the automation tab, and a second clean Chat tab opens for you.</span>
+            <small>If Chrome shows only a globe, right-click the bookmark, choose Edit, and set its name to 💬 Chatbut.</small>
           </div>
           <div className="install-strip__actions">
             {bookmarkletHref ? (
@@ -1296,16 +1294,13 @@ export function App() {
   const bridgePortRef = useRef(null);
   const validationRequestsRef = useRef(new Map());
   const importInputRef = useRef(null);
-  const toastTimerRef = useRef(null);
   const lastSavedConfigRef = useRef("");
   const configRef = useRef(config);
   configRef.current = config;
 
   const validation = useMemo(() => validateConfig(config), [config]);
   function showSavedToast() {
-    window.clearTimeout(toastTimerRef.current);
     setToast("Saved locally. Setting changes sync automatically; re-add the bookmark only after a Chatbut version update.");
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 5_000);
   }
 
   function setConfig(updater) {
@@ -1614,12 +1609,10 @@ export function App() {
           </div>
         ) : null}
         {toast ? (
-          <div className="save-toast" role="status">
+          <div className="save-toast" role="status" aria-live="polite">
             <CheckCircle size={20} weight="bold" aria-hidden="true" />
             <span>{toast}</span>
-            <button type="button" onClick={() => setToast(null)} aria-label="Dismiss saved notification">
-              <X size={18} weight="bold" aria-hidden="true" />
-            </button>
+            <button type="button" onClick={() => setToast(null)}>OK</button>
           </div>
         ) : null}
 
