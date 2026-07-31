@@ -4,15 +4,28 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import { DEFAULT_CONFIG } from "../src/config.js";
 
-const runtime = (await readFile(
+const runtimeSource = (await readFile(
   new URL("../public/chatbut-bookmarklet.min.js", import.meta.url),
   "utf8",
-))
+)).trim();
+const bookmarkletArtifact = (await readFile(
+  new URL("../public/chatbut-bookmarklet.txt", import.meta.url),
+  "utf8",
+)).trim();
+const runtime = runtimeSource
   .replace("__CHATBUT_PAIRING_TOKEN__", "a".repeat(32))
   .replace(
     "__CHATBUT_BRIDGE_URL__",
     "https://jiannystein.github.io/chatbut/chatbut-bridge.html",
   );
+
+test("distributed bookmarklet decodes to the generated runtime", () => {
+  assert.match(bookmarkletArtifact, /^javascript:/);
+  assert.equal(
+    decodeURIComponent(bookmarkletArtifact.slice("javascript:".length)),
+    runtimeSource,
+  );
+});
 
 function makeDom(url, {
   popupBlocked = false,
@@ -450,18 +463,41 @@ test("bookmarklet receives an in-memory configuration from its trusted helper po
         config: DEFAULT_CONFIG,
         fileName: "chatbut.config.json",
         debugReady: true,
+        latestRelease: "0.3.0",
       },
     });
 
     const root = dom.window.document.getElementById("chatbut-runtime");
-    assert.match(root.textContent, /Connected to chatbut\.config\.json/);
-    assert.equal(root.querySelector('[data-role="enable"]').disabled, false);
+    assert.match(root.textContent, /Waiting for the next window/i);
+    assert.match(root.querySelector('[data-role="enable"]').textContent, /^Starts in \d{2,}:\d{2}:\d{2}$/);
+    assert.equal(root.querySelector('[data-role="enable"]').disabled, true);
+    assert.equal(root.querySelector('[data-role="override"]').hidden, false);
     assert.equal(root.querySelector('[data-role="connect"]').hidden, true);
+    assert.match(root.querySelector('[data-role="release"]').textContent, /Update available.*latest v0\.3\.0/i);
     assert.equal(root.querySelector('[data-role="metric-replies"]').textContent, "0");
     assert.equal(root.querySelector(".cb-search"), null);
 
     await root.chatbutRuntime.saveConfig();
     assert.equal(sent.at(-1).type, "chatbut:update-config");
+
+    port.onmessage({
+      data: {
+        type: "chatbut:config-changed",
+        config: {
+          ...structuredClone(DEFAULT_CONFIG),
+          schedule: {
+            ...structuredClone(DEFAULT_CONFIG.schedule),
+            days: [0, 1, 2, 3, 4, 5, 6],
+            windows: [{ start: "00:00", end: "00:00" }],
+          },
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(root.chatbutRuntime.enabled, true);
+    assert.equal(root.querySelector('[data-role="mode"]').textContent, "Enabled");
+    root.chatbutRuntime.stop("Test complete.");
   } finally {
     dom.window.close();
   }
@@ -608,7 +644,7 @@ test("outside-schedule confirmation creates a one-session override", async () =>
     });
 
     const root = dom.window.document.getElementById("chatbut-runtime");
-    root.querySelector('[data-role="enable"]').click();
+    root.querySelector('[data-role="override"]').click();
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(root.chatbutRuntime.scheduleOverride, true);
     assert.match(root.textContent, /Schedule overridden for this session/i);
