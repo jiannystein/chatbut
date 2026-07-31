@@ -10,6 +10,12 @@ import {
   validateConfig,
 } from "../src/config.js";
 import { prepareImportedConfig } from "../src/file-store.js";
+import {
+  formatRuntimeCountdown,
+  nextRuntimeWindowStart,
+  validateRuntimeConfig,
+} from "../src/bookmarklet/runtime-config.js";
+import { isNewerRelease, RELEASE_VERSION } from "../src/release.js";
 
 test("normalization constrains values and migrates a legacy DeepSeek config", () => {
   const normalized = normalizeConfig({
@@ -212,4 +218,44 @@ test("schedule summary uses 24-hour times", () => {
       ],
     },
   }), "Mon–Fri · 06:00–08:00 · 16:00–18:00");
+});
+
+test("the runtime finds the next window and formats total-hour countdowns", () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    schedule: {
+      days: [1],
+      windows: [
+        { start: "06:00", end: "08:00" },
+        { start: "16:00", end: "18:00" },
+      ],
+    },
+  };
+  assert.equal(
+    nextRuntimeWindowStart(config, new Date("2026-07-27T08:30:00")).toISOString(),
+    new Date("2026-07-27T16:00:00").toISOString(),
+  );
+  assert.equal(formatRuntimeCountdown(27 * 3_600_000 + 2_000), "27:00:02");
+});
+
+test("release comparison is semantic and runtime LLM validation accepts redacted keys", () => {
+  assert.equal(RELEASE_VERSION, "0.2.0");
+  assert.equal(isNewerRelease("0.3.0", RELEASE_VERSION), true);
+  assert.equal(isNewerRelease("0.1.9", RELEASE_VERSION), false);
+  assert.equal(isNewerRelease("not-a-version", RELEASE_VERSION), false);
+
+  const runtimeConfig = {
+    ...DEFAULT_CONFIG,
+    llm: {
+      ...DEFAULT_CONFIG.llm,
+      enabled: true,
+      activeProviderId: "deepseek",
+      connections: [{
+        providerId: "deepseek",
+        model: "deepseek-chat",
+        status: "validated",
+      }],
+    },
+  };
+  assert.equal(validateRuntimeConfig(runtimeConfig).valid, true);
 });

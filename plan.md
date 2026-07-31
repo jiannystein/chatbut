@@ -1,18 +1,18 @@
-# Chatbut MVP plan
+# Chatbut Google Chat plan
 
 Status: Google Chat POC implemented and locally verified on 2026-07-31.
 
-## Deferred product TODO
+## Release completion
 
-- [ ] Move both reply-timing controls into **Window**. Rename the current
-  reply-delay control to **First reply delay** and the Vault 2 cooldown to
-  **Second / last reply delay**; keep the current timing behavior unchanged.
-- [ ] Show the Chatbut release version on both the web app and installed
+- [x] Move both reply-timing controls into **Window**. Rename the randomized
+  timing control to **First reply delay** and the follow-up cooldown to
+  **Follow-up availability**; keep the current send behavior unchanged.
+- [x] Show the Chatbut release version on both the web app and installed
   bookmarklet widget. When the web app reports a newer release, show a clear
   **Update available** notice with the installed and latest versions and tell
   the user to remove and re-drag the bookmark. Do not block normal use solely
   because a version check is unavailable.
-- [ ] Improve the pre-schedule state: load the widget disabled with a neutral
+- [x] Improve the pre-schedule state: load the widget disabled with a neutral
   **Starts in HH:MM:SS** countdown that automatically enables at the next
   configured window. Keep **Enable now** as a secondary action protected by
   the existing outside-schedule confirmation. Use total hours when the next
@@ -40,9 +40,8 @@ The POC is feasible through browser-interface automation.
   network APIs.
 - Browser automation is less stable than a supported integration. Every
   ambiguous target, author, reply, composer, or message structure fails closed.
-- A browser security boundary prevented automated execution of the
-  `javascript:` bookmark during the final Chrome pass. The user must perform
-  the last real-send acceptance check by clicking the installed bookmark.
+- Coordinated desktop-Chrome acceptance used the installed bookmark for real
+  1:1 and opted-in Space sends from the signed-in test account.
 
 ## Supported environment
 
@@ -56,7 +55,9 @@ The POC is feasible through browser-interface automation.
 
 ### Non-goals
 
-- Microsoft Teams, Edge, Firefox, Safari, or mobile browser support.
+- Microsoft Teams support in this release. Teams web is the next platform
+  workstream and needs a separate DOM adapter and live acceptance matrix.
+- Edge, Firefox, Safari, or mobile browser support.
 - Background operation while Chrome or the computer is closed, locked, or
   asleep.
 - Google OAuth, a supported Google Chat API integration, a Chat app, or an
@@ -95,7 +96,9 @@ The POC is feasible through browser-interface automation.
   changes and required only after a Chatbut version update.
 - LLM keys stay in the Chatbut-origin worker. They are removed from
   configuration copies sent to Google Chat.
-- Every enable is manual and non-persistent.
+- Every session begins with a deliberate bookmark click and is non-persistent.
+  A click before the schedule may arm one automatic start for the next window
+  while that same tab remains open.
 
 ## Scheduling
 
@@ -104,10 +107,14 @@ The POC is feasible through browser-interface automation.
 - Support same-day and overnight windows.
 - Reject duplicate, overlapping, incomplete, or invalid windows.
 - Only messages arriving after the current enable timestamp are eligible.
-- Outside the configured schedule, require an explicit one-session warning and
-  confirmation. The override lasts until **Stop** or reload.
-- Without an override, automation stops when the schedule closes and does not
-  restart until the next enable.
+- Before the configured schedule, show a neutral total-hour countdown and
+  automatically enable only at the next window. Closing the widget, closing or
+  reloading the tab, or restarting Chrome cancels that one-shot wait.
+- Outside the configured schedule, keep **Enable now** as a secondary action
+  requiring an explicit one-session warning. The override lasts until
+  **Stop** or reload.
+- Without an override, automation stops when the active window closes. It does
+  not arm another day or window without another deliberate bookmark click.
 - The injected widget stays stationary and shows enabled/disabled state,
   immediate Stop, and current-session Replies/Chats/Pending metrics.
 - A browser-local lease permits only one active Chatbut runtime.
@@ -283,15 +290,24 @@ Failure behavior:
 - Recipients receive no Chatbut or AI attribution. The workbench still clearly
   discloses provider data transfer to the user.
 
+## Optional feature verification status
+
+- LLM model discovery, minimal validation, secret redaction, failure fallback,
+  and bridge transport have automated coverage. Live end-to-end adaptation has
+  not been accepted with every supported provider.
+- Human 1:1 request and Space-invitation automation are off by default and have
+  fail-closed fixture coverage. The complete live invitation matrix remains
+  untested.
+
 ## Verification record
 
 Completed locally and in coordinated desktop-Chrome acceptance on 2026-07-31:
 
-- 40 configuration, state-machine, bridge, provider, targeting, redaction, and
+- 43 configuration, state-machine, bridge, provider, targeting, redaction, and
   runtime tests passed.
 - 4 hosting/package tests passed.
 - Production Vite build passed.
-- Encoded bookmarklet: 32,768 of 32,768 bytes.
+- Encoded bookmarklet: 30,440 of 32,768 bytes.
 - Provider CORS preflight passed for model and generation endpoints for
   DeepSeek, OpenAI, Claude, Kimi Global, and Kimi China from the GitHub Pages
   origin.
@@ -325,4 +341,5 @@ Completed locally and in coordinated desktop-Chrome acceptance on 2026-07-31:
 
 - Repository: `https://github.com/jiannystein/chatbut`
 - GitHub Pages: `https://jiannystein.github.io/chatbut/`
-- Microsoft Teams is the next platform candidate, not part of this MVP.
+- Microsoft Teams web is the next platform, not part of this Google Chat
+  release.
