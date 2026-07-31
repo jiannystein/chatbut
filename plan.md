@@ -57,6 +57,10 @@ The POC is feasible through browser-interface automation.
 - Configuration and optional debug logs use versioned IndexedDB records in the
   current Chrome profile.
 - JSON import/export is the explicit backup and transfer mechanism.
+- Reject malformed or structurally invalid imports before replacing local
+  state. Offer to export the current clean configuration, or create and export
+  defaults when no configuration exists; Chrome cannot delete the bad disk
+  file for the user.
 - Chrome does not expose a normal absolute filesystem path for browser-local
   storage; the UI identifies the current Chrome profile instead.
 - Imported credentials remain present but are marked **Needs attention** until
@@ -69,6 +73,9 @@ The POC is feasible through browser-interface automation.
 - The worker can serve configuration after the configurator tab closes.
 - Configuration edits synchronize to a connected runtime. Google Chat target
   changes synchronize back into browser-local storage.
+- Successful workbench edits show a saved toast. Reinstalling the bookmark is
+  unnecessary for settings changes and required only after a Chatbut version
+  update.
 - LLM keys stay in the Chatbut-origin worker. They are removed from
   configuration copies sent to Google Chat.
 - Every enable is manual and non-persistent.
@@ -137,17 +144,20 @@ The POC is feasible through browser-interface automation.
 State is per conversation and per enable session.
 
 1. The first eligible message starts a randomized Vault 1 delay.
-2. Default delay is 30–90 seconds; both bounds are configurable.
+2. Default delay is 5–10 seconds; both bounds are configurable from 1–60
+   seconds.
 3. Eligible messages arriving during the delay are coalesced.
 4. Immediately before sending, re-check schedule/override, enabled state,
    target, identity, manual activity, composer, and DOM structure.
 5. Vault 2 may send at most once per conversation in the session.
 6. Vault 2 requires another eligible message after Vault 1 and the configured
-   cooldown, default 15 minutes.
+   cooldown, default 1 minute and configurable from 1–5 minutes.
 7. Vault 2 never sends merely because the cooldown elapsed.
 8. A manual user message stops automation for that conversation until the next
    enable.
 9. Disabling and re-enabling starts a new session.
+10. Delayed sends are serialized so simultaneous eligible chats cannot race
+    each other while the automation tab navigates.
 
 Circuit breakers:
 
@@ -162,6 +172,9 @@ Circuit breakers:
 - Vault 2 stores follow-up deferrals.
 - Each vault contains one or more editable templates.
 - Select a template randomly from the required vault.
+- Prefer a template not found in recent visible history and not already used
+  for that chat in the current session. If every option has been used, avoid
+  the immediately previous template when possible.
 - Do not enable with an empty vault.
 - Without LLM adaptation, send the selected template unchanged.
 
@@ -256,11 +269,11 @@ Failure behavior:
 
 Completed locally on 2026-07-31:
 
-- 31 configuration, state-machine, bridge, provider, targeting, redaction, and
+- 35 configuration, state-machine, bridge, provider, targeting, redaction, and
   runtime tests passed.
 - 4 hosting/package tests passed.
 - Production Vite build passed.
-- Encoded bookmarklet: 32,071 of 32,768 bytes.
+- Encoded bookmarklet: 32,665 of 32,768 bytes.
 - Provider CORS preflight passed for model and generation endpoints for
   DeepSeek, OpenAI, Claude, Kimi Global, and Kimi China from the GitHub Pages
   origin.

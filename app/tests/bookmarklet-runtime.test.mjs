@@ -115,6 +115,59 @@ test("bookmarklet indexes direct, group-DM, and Space rows with safe labels", as
   }
 });
 
+test("delayed sends for several chats are serialized instead of racing navigation", async () => {
+  const ids = ["dm/original", "dm/one", "dm/two", "dm/three"];
+  const rows = ids.map((id) => `
+    <div role="listitem" data-group-id="${id}" data-display-timestamp="${Date.now() + 10_000}">
+      <span dir="auto">${id}</span>
+    </div>
+  `).join("");
+  const html = `<!doctype html><html><head></head><body>
+    <section aria-label="List of direct messages.">${rows}</section>
+    <main role="main" data-group-id="dm/original"></main>
+  </body></html>`;
+  const { dom } = makeDom("https://chat.google.com/app/home", { html });
+  try {
+    const main = dom.window.document.querySelector("main");
+    for (const row of dom.window.document.querySelectorAll('[role="listitem"]')) {
+      row.addEventListener("click", () => {
+        main.dataset.groupId = row.dataset.groupId;
+        main.innerHTML = `
+          <div role="group" data-id="message-${row.dataset.groupId}" data-user-id="sender">
+            <span data-message-id="message-${row.dataset.groupId}" data-member-id="user/sender">Hello</span>
+          </div>
+        `;
+      });
+    }
+    dom.window.eval(runtime);
+    const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
+    runtimeInstance.config = {
+      ...structuredClone(DEFAULT_CONFIG),
+      delays: { minimumSeconds: 1, maximumSeconds: 1, followUpMinutes: 1 },
+    };
+    runtimeInstance.enabled = true;
+    const events = [];
+    runtimeInstance.sendFor = async (id) => {
+      events.push(`start:${id}`);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      events.push(`end:${id}`);
+    };
+
+    await runtimeInstance.queueConversation("dm/one");
+    await runtimeInstance.queueConversation("dm/two");
+    await runtimeInstance.queueConversation("dm/three");
+    await new Promise((resolve) => setTimeout(resolve, 1_150));
+
+    assert.deepEqual(events, [
+      "start:dm/one", "end:dm/one",
+      "start:dm/two", "end:dm/two",
+      "start:dm/three", "end:dm/three",
+    ]);
+  } finally {
+    dom.window.close();
+  }
+});
+
 test("bookmarklet explains how to recover when Chrome blocks the helper tab", () => {
   const { dom } = makeDom(
     "https://chat.google.com/app/home",

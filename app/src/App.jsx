@@ -485,7 +485,7 @@ function WindowPanel({
           </span>
           <div className="install-strip__copy">
             <strong id="install-heading">Install once, click in Chat</strong>
-            <span>Drag 💬 Chatbut to the Chrome bookmarks bar. Open Google Chat, then click it to start a dedicated automation tab.</span>
+            <span>Drag 💬 Chatbut to the Chrome bookmarks bar. Click it in Google Chat: that tab becomes the automation tab, and a second clean Chat tab opens for you.</span>
           </div>
           <div className="install-strip__actions">
             {bookmarkletHref ? (
@@ -603,7 +603,7 @@ function WindowPanel({
                 <input
                   type="number"
                   min="1"
-                  max="3600"
+                  max="60"
                   value={config.delays.minimumSeconds}
                   onChange={(event) => updateDelay("minimumSeconds", event.target.value)}
                 />
@@ -614,7 +614,7 @@ function WindowPanel({
                 <input
                   type="number"
                   min={config.delays.minimumSeconds}
-                  max="3600"
+                  max="60"
                   value={config.delays.maximumSeconds}
                   onChange={(event) => updateDelay("maximumSeconds", event.target.value)}
                 />
@@ -1123,7 +1123,7 @@ function RepliesPanel({
           <input
             type="number"
             min="1"
-            max="1440"
+            max="5"
             value={config.delays.followUpMinutes}
             onChange={(event) => setConfig((current) => ({
               ...current,
@@ -1290,15 +1290,24 @@ export function App() {
   const [storageLoading, setStorageLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState("idle");
   const [message, setMessage] = useState(null);
+  const [toast, setToast] = useState(null);
   const [bookmarkletHref, setBookmarkletHref] = useState("");
   const [pairingToken] = useState(getOrCreatePairingToken);
   const bridgePortRef = useRef(null);
   const validationRequestsRef = useRef(new Map());
   const importInputRef = useRef(null);
+  const toastTimerRef = useRef(null);
+  const lastSavedConfigRef = useRef("");
   const configRef = useRef(config);
   configRef.current = config;
 
   const validation = useMemo(() => validateConfig(config), [config]);
+  function showSavedToast() {
+    window.clearTimeout(toastTimerRef.current);
+    setToast("Saved locally. Setting changes sync automatically; re-add the bookmark only after a Chatbut version update.");
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 5_000);
+  }
+
   function setConfig(updater) {
     setConfigState((current) => {
       const next = typeof updater === "function" ? updater(current) : updater;
@@ -1331,6 +1340,7 @@ export function App() {
         if (cancelled) return;
         if (record) {
           setConfigState(record.config);
+          lastSavedConfigRef.current = JSON.stringify(record.config);
           setConfigured(true);
           setMessage({ tone: "info", text: "Your browser-local configuration was loaded." });
         }
@@ -1410,6 +1420,8 @@ export function App() {
 
   useEffect(() => {
     if (!configured || storageLoading) return undefined;
+    const serialized = JSON.stringify(config);
+    if (serialized === lastSavedConfigRef.current) return undefined;
     setSaveStatus("saving");
     const timer = window.setTimeout(() => {
       saveLocalConfig(config, pairingToken)
@@ -1418,7 +1430,9 @@ export function App() {
             type: "chatbut:config-app-saved",
             config,
           });
+          lastSavedConfigRef.current = serialized;
           setSaveStatus("saved");
+          showSavedToast();
         })
         .catch((error) => {
           setSaveStatus("error");
@@ -1459,6 +1473,7 @@ export function App() {
       const nextConfig = makeDefaultConfig();
       await createLocalConfig(nextConfig, pairingToken);
       setConfigState(nextConfig);
+      lastSavedConfigRef.current = JSON.stringify(nextConfig);
       setConfigured(true);
       setSaveStatus("saved");
       setMessage({ tone: "info", text: "Created the browser-local configuration. Review the settings, then install the bookmark." });
@@ -1476,6 +1491,7 @@ export function App() {
     try {
       const record = await importConfigFile(file, pairingToken);
       setConfigState(record.config);
+      lastSavedConfigRef.current = JSON.stringify(record.config);
       setConfigured(true);
       setSaveStatus("saved");
       setMessage({
@@ -1485,7 +1501,37 @@ export function App() {
           : "Imported the backup into browser-local storage.",
       });
     } catch (error) {
-      setMessage({ tone: "error", text: error instanceof Error ? error.message : "Unable to import the configuration." });
+      const detail = error instanceof Error ? error.message : "Unable to import the configuration.";
+      setMessage({ tone: "error", text: detail });
+      const recovery = window.confirm(
+        `${detail}\n\nDelete the bad backup from your computer, then ${
+          configured
+            ? "export the current clean configuration as its replacement?"
+            : "create and export a clean replacement?"
+        }`,
+      );
+      if (!recovery) return;
+      if (configured) {
+        exportConfigFile(config);
+        setMessage({ tone: "info", text: "Exported the current clean configuration. Delete the bad backup file manually." });
+        return;
+      }
+      try {
+        const nextConfig = makeDefaultConfig();
+        await createLocalConfig(nextConfig, pairingToken);
+        setConfigState(nextConfig);
+        lastSavedConfigRef.current = JSON.stringify(nextConfig);
+        setConfigured(true);
+        setSaveStatus("saved");
+        exportConfigFile(nextConfig);
+        setMessage({ tone: "info", text: "Created and exported a clean configuration. Delete the bad backup file manually." });
+        setActiveSection("window");
+      } catch (recoveryError) {
+        setMessage({
+          tone: "error",
+          text: recoveryError instanceof Error ? recoveryError.message : "Could not create a clean replacement.",
+        });
+      }
     }
   }
 
@@ -1564,6 +1610,15 @@ export function App() {
             <InlineNotice tone={message.tone}>{message.text}</InlineNotice>
             <button type="button" onClick={() => setMessage(null)} aria-label="Dismiss message">
               <X size={20} weight="bold" aria-hidden="true" />
+            </button>
+          </div>
+        ) : null}
+        {toast ? (
+          <div className="save-toast" role="status">
+            <CheckCircle size={20} weight="bold" aria-hidden="true" />
+            <span>{toast}</span>
+            <button type="button" onClick={() => setToast(null)} aria-label="Dismiss saved notification">
+              <X size={18} weight="bold" aria-hidden="true" />
             </button>
           </div>
         ) : null}

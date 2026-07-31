@@ -5,10 +5,10 @@ import {
   mayInspectConversation,
   maySend,
   mentionTargetsSelf,
+  nonRepeatingTemplate,
   normalizeConversationLabel,
   normalizeDraft,
   randomDelayMs,
-  randomTemplate,
   redactLogValue,
   selectVault,
 } from "./core.js";
@@ -74,7 +74,6 @@ function recentRows() {
         id: row.dataset.groupId,
         label: safeLabel(row),
         kind: classifyConversation(row.dataset.groupId, section),
-        section,
         timestamp: Number(row.dataset.displayTimestamp || 0),
         element: row,
       };
@@ -163,7 +162,6 @@ function styleText() {
 #${ROOT_ID} .cb-metrics div{display:grid;gap:2px;padding:9px 7px}#${ROOT_ID} .cb-metrics div+div{border-left:1px solid #ddd3c5}
 #${ROOT_ID} .cb-metrics dt{color:#746c61;font-size:11px}#${ROOT_ID} .cb-metrics dd{margin:0;color:#191713;font-size:17px;font-weight:750;font-variant-numeric:tabular-nums}
 #${ROOT_ID} .cb-mini{font-size:12px;color:#746c61}#${ROOT_ID} .cb-close{margin-left:0;padding:0;width:32px;min-height:32px;border-color:#655f56;background:transparent;color:white}
-@media(prefers-reduced-motion:reduce){#${ROOT_ID} *{scroll-behavior:auto!important;transition:none!important}}
 `;
 }
 
@@ -189,12 +187,10 @@ class ChatbutRuntime {
   constructor() {
     this.root = null;
     this.config = null;
-    this.configName = "";
     this.connectionNonce = "";
     this.bridgeWindow = null;
     this.bridgePort = null;
     this.connectionTimeout = null;
-    this.debugReady = false;
     this.debug = null;
     this.bridgeRequests = new Map();
     this.enabled = false;
@@ -214,7 +210,8 @@ class ChatbutRuntime {
     this.channel = null;
     this.timer = null;
     this.busy = false;
-    this.titleObserver = null;
+    this.sending = false;
+    this.sendChain = Promise.resolve();
     this.handleWindowMessage = this.handleWindowMessage.bind(this);
     this.handlePortMessage = this.handlePortMessage.bind(this);
   }
@@ -260,14 +257,13 @@ class ChatbutRuntime {
     if (event.data.type !== "chatbut:config") return;
     window.clearTimeout(this.connectionTimeout);
     this.config = event.data.config;
-    this.configName = String(event.data.fileName || "local configuration");
-    this.debugReady = Boolean(event.data.debugReady);
+    const configName = String(event.data.fileName || "local configuration");
     this.debug = this.config.debug.enabled
       ? new BridgeDebugWriter((type, payload) => this.sendBridge(type, payload), this.config)
       : null;
     this.root.querySelector('[data-role="enable"]').disabled = false;
     this.root.querySelector('[data-role="connect"]').hidden = true;
-    this.setStatus(`Connected to ${this.configName}. Enable when ready.`, "ok");
+    this.setStatus(`Connected to ${configName}. Enable when ready.`, "ok");
     this.syncConversationIndex();
   }
 
@@ -350,16 +346,6 @@ class ChatbutRuntime {
     this.root.chatbutRuntime = this;
     this.selfEmail = signedInEmail();
     document.title = "Chatbut automation · Google Chat";
-    this.titleObserver = new MutationObserver(() => {
-      if (document.title !== "Chatbut automation · Google Chat") {
-        document.title = "Chatbut automation · Google Chat";
-      }
-    });
-    this.titleObserver.observe(document.querySelector("title") || document.head, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
     window.addEventListener("message", this.handleWindowMessage);
     this.channel = new BroadcastChannel(CHANNEL_NAME);
     this.channel.onmessage = (event) => {
@@ -498,6 +484,7 @@ class ChatbutRuntime {
       return;
     }
     this.config = validation.config;
+    this.selfEmail = signedInEmail();
     if (!isRuntimeScheduleActive(this.config)) {
       if (!window.confirm("You are outside the configured schedule. Enable anyway until you stop Chatbut or reload this page?")) {
         this.setStatus("Stayed disabled. Review the schedule or enable again to use a one-session override.");
@@ -534,6 +521,7 @@ class ChatbutRuntime {
     this.sent = [];
     this.sessionCount = 0;
     this.sessionChats.clear();
+    this.sendChain = Promise.resolve();
     this.updateMetrics();
     this.root.querySelector('[data-role="enable"]').hidden = true;
     this.root.querySelector('[data-role="stop"]').hidden = false;
@@ -583,7 +571,7 @@ class ChatbutRuntime {
   }
 
   async tick() {
-    if (!this.enabled || this.busy) return;
+    if (!this.enabled || this.busy || this.sending) return;
     if (!this.scheduleOverride && !isRuntimeScheduleActive(this.config)) {
       this.stop("The scheduled window closed. Enable again in the next window.");
       return;
@@ -637,7 +625,28 @@ class ChatbutRuntime {
     }
     const delay = randomDelayMs(this.config.delays.minimumSeconds, this.config.delays.maximumSeconds);
     this.processed.add(message.id);
-    const timeout = setTimeout(() => this.sendFor(id, vaultName, message.id), delay);
+    const timeout = setTimeout(() => {
+      this.sendChain = this.sendChain
+        .then(async () => {
+          while (this.busy && this.enabled) await sleep(100);
+          if (!this.enabled) {
+            this.pending.delete(id);
+            this.updateMetrics();
+            return;
+          }
+          this.sending = true;
+          try {
+            await this.sendFor(id, vaultName, message.id);
+          } finally {
+            this.sending = false;
+          }
+        })
+        .catch((error) => {
+          this.pending.delete(id);
+          this.updateMetrics();
+          this.debug?.write("send_error", { id, message: error.message });
+        });
+    }, delay);
     this.pending.set(id, timeout);
     this.updateMetrics();
     await this.debug?.write("queued", { id, vaultName, delay });
@@ -661,7 +670,11 @@ class ChatbutRuntime {
       if (previousId) await navigateTo(previousId);
       return;
     }
-    const template = randomTemplate(this.config.responses[vaultName]);
+    const templateHistory = state.usedTemplates?.[vaultName] || [];
+    const template = nonRepeatingTemplate(this.config.responses[vaultName], {
+      recentMessages: recentContext(conversation.main, 50),
+      usedTemplates: templateHistory,
+    });
     if (!template) return;
     let reply = template;
     let fallback = false;
@@ -680,6 +693,7 @@ class ChatbutRuntime {
         await this.debug?.write("ai_fallback", { id, message: error.message });
       }
     }
+    if (!this.enabled) return;
     const composer = uniqueVisible('[role="textbox"][contenteditable="true"]', conversation.main);
     const send = [...conversation.main.querySelectorAll('button[aria-label*="Send message" i]')].filter(visible);
     if (!composer || send.length !== 1 || currentConversation()?.id !== id) {
@@ -705,6 +719,10 @@ class ChatbutRuntime {
     const sentAt = Date.now();
     if (vaultName === "vault1") state.firstSentAt = sentAt;
     else state.secondSentAt = sentAt;
+    state.usedTemplates = {
+      ...(state.usedTemplates || {}),
+      [vaultName]: [...templateHistory, template].slice(-this.config.responses[vaultName].length),
+    };
     this.states.set(id, state);
     this.sent.push(sentAt);
     this.sessionCount += 1;

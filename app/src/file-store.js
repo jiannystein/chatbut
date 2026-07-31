@@ -1,6 +1,7 @@
 import {
   markImportedConnectionsForValidation,
   normalizeConfig,
+  validateConfig,
 } from "./config.js";
 
 export const DATABASE_NAME = "chatbut-local";
@@ -117,6 +118,31 @@ export async function deleteLocalConfig() {
   announceConfigChange(Date.now());
 }
 
+export function prepareImportedConfig(parsed) {
+  if (
+    !parsed
+    || typeof parsed !== "object"
+    || Array.isArray(parsed)
+    || !parsed.schedule
+    || typeof parsed.schedule !== "object"
+    || !parsed.responses
+    || typeof parsed.responses !== "object"
+  ) {
+    throw new Error("This Chatbut backup is incomplete or corrupt. It was not imported.");
+  }
+  const config = markImportedConnectionsForValidation(parsed);
+  const structuralValidation = validateConfig({
+    ...config,
+    llm: { ...config.llm, enabled: false },
+  });
+  if (!structuralValidation.valid) {
+    throw new Error(
+      `This Chatbut backup is invalid and was not imported. ${structuralValidation.errors.join(" ")}`,
+    );
+  }
+  return config;
+}
+
 export async function importConfigFile(file, pairingToken) {
   if (!(file instanceof Blob)) throw new Error("Choose a Chatbut JSON file to import.");
   let parsed;
@@ -125,7 +151,7 @@ export async function importConfigFile(file, pairingToken) {
   } catch {
     throw new Error("That file is not valid JSON. Choose a Chatbut configuration backup.");
   }
-  const config = markImportedConnectionsForValidation(parsed);
+  const config = prepareImportedConfig(parsed);
   return saveLocalConfig(config, pairingToken);
 }
 

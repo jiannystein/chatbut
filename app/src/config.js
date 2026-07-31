@@ -26,9 +26,9 @@ export const DEFAULT_CONFIG = Object.freeze({
     timezone: "browser",
   },
   delays: {
-    minimumSeconds: 30,
-    maximumSeconds: 90,
-    followUpMinutes: 15,
+    minimumSeconds: 5,
+    maximumSeconds: 10,
+    followUpMinutes: 1,
   },
   targeting: {
     directMode: "everyone-except",
@@ -192,16 +192,29 @@ export function normalizeConfig(input = {}) {
   const invitations = source.invitations && typeof source.invitations === "object" ? source.invitations : {};
   const llm = source.llm && typeof source.llm === "object" ? source.llm : migrateLegacyAi(source);
   const debug = source.debug && typeof source.debug === "object" ? source.debug : {};
+  const legacyTimingDefaults = Number(delays.minimumSeconds) === 30
+    && Number(delays.maximumSeconds) === 90
+    && Number(delays.followUpMinutes) === 15;
 
   const days = Array.isArray(schedule.days)
     ? [...new Set(schedule.days.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))]
     : fallback.schedule.days;
 
   const minimumSeconds = Math.round(
-    clampNumber(delays.minimumSeconds, 1, 3_600, fallback.delays.minimumSeconds),
+    clampNumber(
+      legacyTimingDefaults ? fallback.delays.minimumSeconds : delays.minimumSeconds,
+      1,
+      60,
+      fallback.delays.minimumSeconds,
+    ),
   );
   const maximumSeconds = Math.round(
-    clampNumber(delays.maximumSeconds, minimumSeconds, 3_600, fallback.delays.maximumSeconds),
+    clampNumber(
+      legacyTimingDefaults ? fallback.delays.maximumSeconds : delays.maximumSeconds,
+      minimumSeconds,
+      60,
+      fallback.delays.maximumSeconds,
+    ),
   );
   const connections = cleanConnections(llm.connections);
   const requestedActive = PROVIDER_IDS.includes(llm.activeProviderId) ? llm.activeProviderId : "";
@@ -220,7 +233,12 @@ export function normalizeConfig(input = {}) {
       minimumSeconds,
       maximumSeconds,
       followUpMinutes: Math.round(
-        clampNumber(delays.followUpMinutes, 1, 1_440, fallback.delays.followUpMinutes),
+        clampNumber(
+          legacyTimingDefaults ? fallback.delays.followUpMinutes : delays.followUpMinutes,
+          1,
+          5,
+          fallback.delays.followUpMinutes,
+        ),
       ),
     },
     targeting: {
