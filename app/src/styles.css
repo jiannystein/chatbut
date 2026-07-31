@@ -1,7 +1,7 @@
 /* Hallmark · macrostructure: Workbench · app shell with side-rail and live control proof
  * theme: custom · vibe: "warm editorial utility, controlled and local" · paper: oklch(97% 0.012 82) · accent: oklch(61% 0.176 43)
  * display: Newsreader Variable · body: Manrope Variable · axes: light / roman-serif / warm
- * studied: no · context: user-provided · v2.0.0
+ * studied: no · context: user-provided · v2.1.0
  * audience: managed-Chrome knowledge workers · use: configure and safely enable local auto-acknowledgements · tone: calm utilitarian
  * Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V4 · contrast: pass (40–41) · nav: N3 · footer: Ft1 · slop: pass (42–45)
  * honest: pass (46) · chrome: pass (47) · tokens: pass (48) · responsive: pass (49) · icons: pass (30) · mobile: pass (34, 49, 50–57)
@@ -651,6 +651,7 @@ ul {
 
 .day-selector legend,
 .time-fields label > span,
+.schedule-time-field > span,
 .field-row--inputs label > span,
 .search-field > span,
 .vault-item label > span,
@@ -678,8 +679,33 @@ ul {
 }
 
 .time-fields--window {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: end;
+}
+
+.schedule-time-field {
+  display: grid;
+  min-width: 0;
+}
+
+.schedule-time-field input {
+  max-width: 100%;
+  font-size: clamp(var(--text-base), 3.8vw, var(--text-lg));
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+}
+
+.schedule-time-field small {
+  min-height: 1.15rem;
+  margin-block-start: var(--space-2xs);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
+.schedule-time-field input[aria-invalid="true"] + small {
+  color: var(--color-error);
 }
 
 .day-selector__grid {
@@ -865,67 +891,106 @@ button.field-row:active {
 .overlay-frame {
   align-self: start;
   min-width: 0;
-  padding: var(--space-sm);
-  border: var(--rule-thin) solid var(--color-rule);
-  border-radius: var(--radius-lg);
-  background: var(--color-paper-2);
-  color: var(--color-ink);
-}
-
-.overlay-frame__label {
-  display: block;
-  margin: var(--space-xs);
-  color: var(--color-ink-2);
-  font-size: var(--text-sm);
-  font-weight: 650;
-}
-
-.overlay-panel {
-  display: grid;
-  justify-items: center;
-  gap: var(--space-sm);
-  padding: var(--space-xl) var(--space-lg);
+  padding: var(--space-md);
   border: var(--rule-thin) solid var(--color-rule);
   border-radius: var(--radius-md);
   background: var(--color-paper);
   color: var(--color-ink);
-  box-shadow: 0 0.75rem 2rem var(--color-shadow);
-  text-align: center;
 }
 
-.overlay-panel.is-enabled {
-  border-color: var(--color-support);
-  background: var(--color-support-soft);
+.overlay-frame__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-block-end: var(--space-md);
 }
 
-.overlay-panel img {
-  inline-size: 4.5rem;
-  block-size: 4.5rem;
-  object-fit: contain;
+.overlay-frame__label {
+  color: var(--color-ink-2);
+  font-size: var(--text-sm);
+  font-weight: 750;
 }
 
-.overlay-panel h2 {
+.preview-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.75rem;
+  padding-inline: var(--space-sm);
+  border: var(--rule-thin) solid var(--color-rule);
+  border-radius: var(--radius-pill);
+  background: var(--color-paper-2);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 750;
+}
+
+.overlay-panel {
+  display: grid;
+  gap: var(--space-sm);
+  padding-block-start: var(--space-md);
+  border-block-start: var(--rule-thin) solid var(--color-rule);
+  color: var(--color-ink);
+}
+
+.overlay-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.overlay-panel__header strong {
+  font-family: var(--font-display);
   font-size: var(--text-xl);
   letter-spacing: -0.025em;
 }
 
-.overlay-panel p {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-xs);
+.overlay-panel__header span {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-weight: 750;
+}
+
+.overlay-panel .overlay-panel__status {
   color: var(--color-muted);
   font-size: var(--text-sm);
   line-height: 1.5;
 }
 
+.overlay-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-block: var(--rule-thin) solid var(--color-rule);
+}
+
+.overlay-metrics > div {
+  display: grid;
+  gap: var(--space-2xs);
+  padding: var(--space-sm) var(--space-xs);
+}
+
+.overlay-metrics > div + div {
+  border-inline-start: var(--rule-thin) solid var(--color-rule);
+}
+
+.overlay-metrics dt {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.overlay-metrics dd {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-variant-numeric: tabular-nums;
+  font-weight: 750;
+}
+
 .overlay-panel__actions {
   inline-size: 100%;
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-xs);
-  margin-block-start: var(--space-sm);
-  padding-block-start: var(--space-md);
-  border-block-start: var(--rule-thin) solid var(--color-rule);
 }
 
 .overlay-panel__actions .button {
@@ -933,7 +998,6 @@ button.field-row:active {
 }
 
 .overlay-panel__reassurance {
-  margin-block-start: var(--space-sm);
   color: var(--color-muted);
   font-size: var(--text-xs);
   line-height: 1.5;
@@ -1039,6 +1103,78 @@ button.field-row:active {
   display: grid;
   gap: var(--space-lg);
   margin-block: var(--space-lg);
+}
+
+.target-manager {
+  min-width: 0;
+  margin-block: var(--space-xl);
+  padding-block: var(--space-lg);
+  border-block: var(--rule-thin) solid var(--color-rule);
+}
+
+.search-results-count {
+  margin-block-start: var(--space-sm);
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.conversation-list {
+  display: grid;
+  margin-block-start: var(--space-sm);
+  border-block-start: var(--rule-thin) solid var(--color-rule-2);
+  list-style: none;
+}
+
+.conversation-list li {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-block: var(--space-sm);
+  border-block-end: var(--rule-thin) solid var(--color-rule-2);
+}
+
+.conversation-list__icon {
+  inline-size: 2.5rem;
+  block-size: 2.5rem;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--color-support-soft);
+  color: var(--color-support);
+}
+
+.conversation-list__copy {
+  min-width: 0;
+  display: grid;
+  gap: var(--space-2xs);
+}
+
+.conversation-list__copy strong {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-list__copy span {
+  color: var(--color-muted);
+  font-size: var(--text-xs);
+}
+
+.conversation-list button {
+  min-height: 2.5rem;
+  padding-inline: var(--space-sm);
+  border: var(--rule-thin) solid var(--color-rule);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: 750;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
 .editor-section,
@@ -1402,6 +1538,12 @@ button.field-row:active {
   margin-block-start: var(--space-lg);
 }
 
+.cooldown-field input {
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
 .input-suffix {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1687,7 +1829,15 @@ button.field-row:active {
   }
 
   .policy-band {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .time-fields--window {
+    grid-template-columns: repeat(2, minmax(9rem, 1fr)) auto;
+  }
+
+  .time-fields--window .icon-button {
+    margin-block-end: 1.15rem;
   }
 
   .api-panel__fields {
@@ -1822,8 +1972,7 @@ button.field-row:active {
   }
 
   .window-editor {
-    grid-template-columns: minmax(0, 1.45fr) minmax(15rem, 0.55fr);
-    align-items: end;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .editor-grid,
@@ -1980,13 +2129,13 @@ button.field-row:active {
     justify-content: flex-end;
   }
 
-  .time-fields--window {
-    grid-template-columns: 1fr 1fr;
+  .conversation-list li {
+    grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .time-fields--window .icon-button {
-    grid-column: 1 / -1;
-    justify-self: end;
+  .conversation-list button {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .app-footer a,
@@ -2003,6 +2152,7 @@ button.field-row:active {
   select,
   .icon-button,
   .target-list button,
+  .conversation-list button,
   .message-row > button {
     min-height: 3rem;
   }

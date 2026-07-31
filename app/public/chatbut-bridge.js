@@ -1,6 +1,7 @@
 const status = document.getElementById("bridge-status");
-const [token = "", nonce = ""] = location.hash.slice(1).split(".");
+const [token = "", nonce = "", mode = ""] = location.hash.slice(1).split(".");
 const openerOrigin = "https://chat.google.com";
+const cleanGoogleChatUrl = "https://chat.google.com/app/home";
 
 function fail(message) {
   status.textContent = message;
@@ -35,8 +36,13 @@ if (
       openerOrigin,
       [worker.port],
     );
-    status.textContent = "Connected. This helper tab can close.";
-    window.setTimeout(() => window.close(), 250);
+    if (mode === "handoff") {
+      status.textContent = "Connected. Opening a clean Google Chat tab…";
+      window.setTimeout(() => location.replace(cleanGoogleChatUrl), 250);
+    } else {
+      status.textContent = "Connected. This helper tab can close.";
+      window.setTimeout(() => window.close(), 250);
+    }
   } catch {
     fail("Chrome could not create the local Chatbut bridge.");
   }

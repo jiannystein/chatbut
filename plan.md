@@ -62,9 +62,10 @@ The POC is feasible through browser-interface automation.
 - Imported credentials remain present but are marked **Needs attention** until
   they pass validation in the current profile.
 - A random pairing token is embedded when the bookmark is installed.
-- Clicking the bookmark opens a short-lived helper at the exact Chatbut origin.
-  The helper transfers a paired `SharedWorker` message port to the exact Google
-  Chat opener and closes.
+- Clicking the bookmark turns the current Google Chat page into a dedicated
+  automation tab and opens a helper at the exact Chatbut origin. The helper
+  transfers a paired `SharedWorker` message port to the exact Google Chat
+  opener, then navigates itself to a clean Google Chat tab for normal use.
 - The worker can serve configuration after the configurator tab closes.
 - Configuration edits synchronize to a connected runtime. Google Chat target
   changes synchronize back into browser-local storage.
@@ -83,8 +84,8 @@ The POC is feasible through browser-interface automation.
   confirmation. The override lasts until **Stop** or reload.
 - Without an override, automation stops when the schedule closes and does not
   restart until the next enable.
-- The overlay always shows an unmistakable enabled or disabled state and an
-  immediate kill switch.
+- The injected widget stays stationary and shows enabled/disabled state,
+  immediate Stop, and current-session Replies/Chats/Pending metrics.
 - A browser-local lease permits only one active Chatbut runtime.
 
 ## Conversation targeting
@@ -94,6 +95,13 @@ The POC is feasible through browser-interface automation.
 - Default: every one-to-one conversation except saved exclusions.
 - Ignore the user's own messages, bots/apps, unsupported message types, and
   unresolved identities.
+
+### Multi-person direct messages
+
+- Default: every multi-person DM except saved exclusions.
+- Require a verified `@mention` of the signed-in account or a verified direct
+  reply before responding.
+- If the signed-in identity or reply target cannot be verified, skip.
 
 ### Spaces
 
@@ -109,8 +117,9 @@ The POC is feasible through browser-interface automation.
 - Fuzzy search results appear in a click-to-add dropdown.
 - Save stable IDs and human-readable labels.
 - Never silently retarget by display name.
-- The workbench edits saved targets; the injected overlay indexes and adds live
-  Google Chat conversations.
+- The runtime refreshes a browser-local recent-conversation index.
+- The workbench provides one searchable policy list; the injected widget does
+  not contain targeting controls.
 
 ### Invitation acceptance
 
@@ -247,29 +256,29 @@ Failure behavior:
 
 Completed locally on 2026-07-31:
 
-- 24 configuration, state-machine, bridge, provider, targeting, redaction, and
+- 31 configuration, state-machine, bridge, provider, targeting, redaction, and
   runtime tests passed.
 - 4 hosting/package tests passed.
 - Production Vite build passed.
-- Encoded bookmarklet: 28,225 of 32,768 bytes.
+- Encoded bookmarklet: 32,071 of 32,768 bytes.
 - Provider CORS preflight passed for model and generation endpoints for
   DeepSeek, OpenAI, Claude, Kimi Global, and Kimi China from the GitHub Pages
   origin.
-- Chrome UI verified at 320, 375, 414, 768, and desktop widths with no
-  horizontal overflow.
+- Chrome UI visually verified at 320, 375, 414, 768, and desktop widths,
+  including the expanded 24-hour schedule editor.
 - Browser-local configuration persisted across reload.
 - Invalid DeepSeek credentials produced a non-secret, actionable error and
   were not saved.
-- Direct-message and Space selectors, composer uniqueness, send controls,
-  authorship, and a live Space mention were verified in the signed-in test
-  account.
+- Live Google Chat verified the direct/Space sidebar sections and signed-in
+  identity signal. Fixtures cover 1:1, multi-person DM, and Space
+  classification, safe labels, and opt-in prefiltering.
 
 Remaining user acceptance:
 
-- Install the bookmark from the published site.
+- Replace the old bookmark with the newly published **💬 Chatbut** bookmark.
 - Click it in the prepared Google Chat test conversation.
-- Enable and observe one controlled direct/Space response inside the configured
-  delay.
+- Enable and observe one controlled 1:1 reply, one multi-person DM mention, and
+  one opted-in Space mention inside the configured delay.
 - Confirm the correct conversation, ordinary user attribution, saved-only
   fallback, Stop control, and no duplicate send.
 
@@ -278,7 +287,7 @@ Remaining user acceptance:
 - Google Chat DOM changes can break detection or sending.
 - Background-tab throttling can lengthen configured delays.
 - Programmatic navigation can mark a conversation read.
-- Managed Chrome policy can block bookmarklets, popups, SharedWorker,
+- Managed Chrome policy can block bookmarklets, helper tabs, SharedWorker,
   IndexedDB, or provider network access.
 - A plaintext Chrome profile or exported JSON backup is readable by anyone or
   any process with access to it.

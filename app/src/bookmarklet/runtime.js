@@ -1,8 +1,11 @@
 import { isRuntimeScheduleActive, validateRuntimeConfig } from "./runtime-config.js";
 import {
-  fuzzyScore,
+  classifyConversation,
   isTargetAllowed,
+  mayInspectConversation,
   maySend,
+  mentionTargetsSelf,
+  normalizeConversationLabel,
   normalizeDraft,
   randomDelayMs,
   randomTemplate,
@@ -33,46 +36,84 @@ function uniqueVisible(selector, root = document) {
   return matches.length === 1 ? matches[0] : null;
 }
 
-function conversationKind(id) {
-  return String(id).startsWith("dm/") ? "direct" : String(id).startsWith("space/") ? "space" : "unknown";
+function conversationSection(row) {
+  if (row.closest('[aria-label*="list of spaces" i]')) return "space";
+  if (row.closest('[aria-label*="direct messages" i]')) return "direct";
+  return "unknown";
 }
 
 function safeLabel(row) {
-  const candidates = [...row.querySelectorAll("[aria-label]")]
-    .map((node) => node.getAttribute("aria-label"))
-    .filter((value) => value && value.length < 160);
-  return candidates[0] || textOf(row).slice(0, 100) || row.dataset.groupId;
+  const blocked = /press tab|more options|open in a pop-up|unread|online|offline|away|notifications?|conversation options|^options$/i;
+  const candidates = [];
+  for (const node of row.querySelectorAll('[dir="auto"], [aria-label], [data-tooltip]')) {
+    const values = [
+      node.getAttribute("aria-label"),
+      node.getAttribute("data-tooltip"),
+      node.matches('[dir="auto"]') ? textOf(node) : "",
+    ];
+    for (const raw of values) {
+      const label = normalizeConversationLabel(raw, "");
+      if (!label || label.length > 120 || blocked.test(label) || /^\d{1,2}:\d{2}\b/.test(label)) continue;
+      const score = (node.matches('[dir="auto"]') ? 40 : 0)
+        + (node.hasAttribute("aria-label") ? 10 : 0)
+        - Math.max(0, label.split(/\s+/).length - 8);
+      candidates.push({ label, score });
+    }
+  }
+  candidates.sort((a, b) => b.score - a.score || a.label.length - b.label.length);
+  return candidates[0]?.label
+    || normalizeConversationLabel(textOf(row).slice(0, 100), row.dataset.groupId);
 }
 
 function recentRows() {
   return [...document.querySelectorAll(ROW_SELECTOR)]
     .filter(visible)
-    .map((row) => ({
-      id: row.dataset.groupId,
-      label: safeLabel(row),
-      timestamp: Number(row.dataset.displayTimestamp || 0),
-      element: row,
-    }))
-    .filter((item) => item.id);
+    .map((row) => {
+      const section = conversationSection(row);
+      return {
+        id: row.dataset.groupId,
+        label: safeLabel(row),
+        kind: classifyConversation(row.dataset.groupId, section),
+        section,
+        timestamp: Number(row.dataset.displayTimestamp || 0),
+        element: row,
+      };
+    })
+    .filter((item) => item.id && item.kind !== "unknown");
 }
 
 function currentConversation() {
   const main = uniqueVisible(MAIN_SELECTOR);
   if (!main) return null;
+  const row = recentRows().find((item) => item.id === main.dataset.groupId);
   return {
     id: main.dataset.groupId,
-    kind: conversationKind(main.dataset.groupId),
+    kind: row?.kind || (
+      String(main.dataset.groupId).startsWith("dm/")
+        ? classifyConversation(main.dataset.groupId, "direct")
+        : "unknown"
+    ),
     main,
   };
 }
 
-function latestIncoming(main) {
+function signedInEmail() {
+  const accountControl = document.querySelector(
+    'a[aria-label*="Google Account" i], button[aria-label*="Google Account" i]',
+  );
+  const label = accountControl?.getAttribute("aria-label") || "";
+  return label.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase() || "";
+}
+
+function latestIncoming(main, selfEmail) {
   const groups = [...main.querySelectorAll(MESSAGE_SELECTOR)].filter(visible);
   const group = groups.at(-1);
   if (!group) return null;
   const author = group.querySelector("[data-message-id][data-member-id]");
   if (!author || author.dataset.originGsuiteApp === "1") return null;
-  const mention = Boolean(group.querySelector('span[data-user-mention-type="1"][data-user-email]'));
+  const mentionEmails = [...group.querySelectorAll("span[data-user-email]")]
+    .map((node) => node.getAttribute("data-user-email"))
+    .filter(Boolean);
   const repliedToSelf = Boolean(
     group.querySelector('[aria-label*="replied to you" i], [data-reply-to-self="true"]'),
   );
@@ -81,7 +122,7 @@ function latestIncoming(main) {
     userId: group.dataset.userId,
     memberId: author.dataset.memberId,
     text: textOf(group).slice(0, 1200),
-    mentionedSelf: mention,
+    mentionedSelf: mentionTargetsSelf(mentionEmails, selfEmail),
     repliedToSelf,
     element: group,
   };
@@ -111,16 +152,16 @@ async function navigateTo(id) {
 
 function styleText() {
   return `
-#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:min(360px,calc(100vw - 24px));font:14px/1.45 system-ui,-apple-system,sans-serif;color:#191713;background:#fffaf0;border:1px solid #d5cbbb;border-radius:16px;box-shadow:0 16px 48px #0003;overflow:hidden}
-#${ROOT_ID} *{box-sizing:border-box}#${ROOT_ID} header{display:flex;align-items:center;gap:10px;padding:14px 16px;background:#1d1b18;color:#fffaf0}
-#${ROOT_ID} header strong{font:700 19px/1.1 Georgia,serif}#${ROOT_ID} header span{margin-left:auto;color:#d8d1c5;font-size:12px}
-#${ROOT_ID} main{display:grid;gap:12px;padding:16px}#${ROOT_ID} p{margin:0;color:#625c52}#${ROOT_ID} .cb-status{padding:10px 12px;border-left:4px solid #b94f25;background:#f7eee3}
-#${ROOT_ID} .cb-status[data-tone="ok"]{border-color:#287459;background:#e8f2ec}#${ROOT_ID} .cb-actions{display:flex;flex-wrap:wrap;gap:8px}
-#${ROOT_ID} button,#${ROOT_ID} input{font:inherit}#${ROOT_ID} button{min-height:38px;padding:0 13px;border:1px solid #bcb1a0;border-radius:9px;background:#fffaf0;color:#191713;font-weight:700;cursor:pointer}
+#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:min(320px,calc(100vw - 24px));font:14px/1.45 system-ui,-apple-system,sans-serif;color:#191713;background:#fffaf0;border:1px solid #d5cbbb;border-radius:14px;box-shadow:0 14px 42px #0003;overflow:hidden}
+#${ROOT_ID} *{box-sizing:border-box}#${ROOT_ID} header{display:flex;align-items:center;gap:10px;padding:12px 14px;background:#1d1b18;color:#fffaf0}
+#${ROOT_ID} header strong{font:700 19px/1.1 Georgia,serif}#${ROOT_ID} header span{margin-left:auto;color:#d8d1c5;font-size:12px;font-weight:700}
+#${ROOT_ID} main{display:grid;gap:11px;padding:14px}#${ROOT_ID} p{margin:0;color:#625c52}#${ROOT_ID} .cb-status{min-height:40px;padding:9px 10px;border-left:3px solid #b94f25;background:#f7eee3}
+#${ROOT_ID} .cb-status[data-tone="ok"]{border-color:#287459;background:#e8f2ec}#${ROOT_ID} .cb-actions{display:grid;grid-template-columns:1fr;gap:8px}
+#${ROOT_ID} button{font:inherit;min-height:40px;padding:0 13px;border:1px solid #bcb1a0;border-radius:8px;background:#fffaf0;color:#191713;font-weight:750;cursor:pointer}
 #${ROOT_ID} button.cb-primary{border-color:#b94f25;background:#b94f25;color:white}#${ROOT_ID} button.cb-stop{border-color:#287459;background:#287459;color:white}
-#${ROOT_ID} button:disabled{opacity:.5;cursor:not-allowed}#${ROOT_ID} .cb-search{display:grid;gap:7px;border-top:1px solid #ddd3c5;padding-top:12px}
-#${ROOT_ID} input{width:100%;min-height:38px;padding:0 10px;border:1px solid #bcb1a0;border-radius:8px;background:white}
-#${ROOT_ID} .cb-results{display:grid;gap:5px;max-height:120px;overflow:auto}#${ROOT_ID} .cb-results button{text-align:left;font-weight:600;white-space:normal}
+#${ROOT_ID} button:disabled{opacity:.5;cursor:not-allowed}#${ROOT_ID} .cb-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0;border-block:1px solid #ddd3c5}
+#${ROOT_ID} .cb-metrics div{display:grid;gap:2px;padding:9px 7px}#${ROOT_ID} .cb-metrics div+div{border-left:1px solid #ddd3c5}
+#${ROOT_ID} .cb-metrics dt{color:#746c61;font-size:11px}#${ROOT_ID} .cb-metrics dd{margin:0;color:#191713;font-size:17px;font-weight:750;font-variant-numeric:tabular-nums}
 #${ROOT_ID} .cb-mini{font-size:12px;color:#746c61}#${ROOT_ID} .cb-close{margin-left:0;padding:0;width:32px;min-height:32px;border-color:#655f56;background:transparent;color:white}
 @media(prefers-reduced-motion:reduce){#${ROOT_ID} *{scroll-behavior:auto!important;transition:none!important}}
 `;
@@ -165,11 +206,15 @@ class ChatbutRuntime {
     this.pending = new Map();
     this.sent = [];
     this.sessionCount = 0;
+    this.sessionChats = new Set();
     this.originalId = "";
     this.lastSpaceInviteScan = 0;
+    this.lastIndexSync = 0;
+    this.selfEmail = "";
     this.channel = null;
     this.timer = null;
     this.busy = false;
+    this.titleObserver = null;
     this.handleWindowMessage = this.handleWindowMessage.bind(this);
     this.handlePortMessage = this.handlePortMessage.bind(this);
   }
@@ -191,6 +236,7 @@ class ChatbutRuntime {
   handlePortMessage(event) {
     if (event.data?.type === "chatbut:config-changed" && event.data.config) {
       this.config = event.data.config;
+      this.syncConversationIndex();
       return;
     }
     if (event.data?.nonce !== this.connectionNonce) return;
@@ -222,6 +268,7 @@ class ChatbutRuntime {
     this.root.querySelector('[data-role="enable"]').disabled = false;
     this.root.querySelector('[data-role="connect"]').hidden = true;
     this.setStatus(`Connected to ${this.configName}. Enable when ready.`, "ok");
+    this.syncConversationIndex();
   }
 
   requestBridge(type, payload, successTypes, timeoutMs = 45_000) {
@@ -271,12 +318,11 @@ class ChatbutRuntime {
     }
     this.setStatus("Requesting your configuration…");
     this.bridgeWindow = window.open(
-      `${BRIDGE_URL}#${PAIRING_TOKEN}.${this.connectionNonce}`,
-      "chatbut-config-bridge",
-      "popup,width=440,height=260",
+      `${BRIDGE_URL}#${PAIRING_TOKEN}.${this.connectionNonce}.handoff`,
+      "_blank",
     );
     if (!this.bridgeWindow) {
-      this.setStatus("Chrome blocked the helper popup. Allow it, then retry.");
+      this.setStatus("Chrome blocked the helper tab. Allow it, then retry.");
     }
   }
 
@@ -302,6 +348,18 @@ class ChatbutRuntime {
     }
     this.render();
     this.root.chatbutRuntime = this;
+    this.selfEmail = signedInEmail();
+    document.title = "Chatbut automation · Google Chat";
+    this.titleObserver = new MutationObserver(() => {
+      if (document.title !== "Chatbut automation · Google Chat") {
+        document.title = "Chatbut automation · Google Chat";
+      }
+    });
+    this.titleObserver.observe(document.querySelector("title") || document.head, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
     window.addEventListener("message", this.handleWindowMessage);
     this.channel = new BroadcastChannel(CHANNEL_NAME);
     this.channel.onmessage = (event) => {
@@ -349,24 +407,25 @@ class ChatbutRuntime {
     stop.dataset.role = "stop";
     stop.hidden = true;
     actions.append(connect, enable, stop);
-    const search = document.createElement("div");
-    search.className = "cb-search";
-    const searchLabel = document.createElement("label");
-    searchLabel.textContent = "Find chats to allow or exclude";
-    const input = document.createElement("input");
-    input.type = "search";
-    input.placeholder = "Search recent conversations";
-    input.addEventListener("input", () => this.renderSearch(input.value, results));
-    const results = document.createElement("div");
-    results.className = "cb-results";
-    search.append(searchLabel, input, results);
+    const metrics = document.createElement("dl");
+    metrics.className = "cb-metrics";
+    for (const [role, label] of [["replies", "Replies"], ["chats", "Chats"], ["pending", "Pending"]]) {
+      const metric = document.createElement("div");
+      const term = document.createElement("dt");
+      const value = document.createElement("dd");
+      term.textContent = label;
+      value.textContent = "0";
+      value.dataset.role = `metric-${role}`;
+      metric.append(term, value);
+      metrics.append(metric);
+    }
     const note = document.createElement("p");
     note.className = "cb-mini";
-    note.textContent = "The configurator tab may be closed after setup.";
-    main.append(status, actions, search, note);
+    note.textContent = "Only new eligible messages · session safety limit 20";
+    main.append(status, metrics, actions, note);
     this.root.append(header, main);
     document.body.append(this.root);
-    this.renderSearch("", results);
+    this.updateMetrics();
   }
 
   button(label, handler) {
@@ -385,10 +444,51 @@ class ChatbutRuntime {
     }
   }
 
+  updateMetrics() {
+    const metrics = {
+      replies: this.sessionCount,
+      chats: this.sessionChats.size,
+      pending: this.pending.size,
+    };
+    for (const [role, value] of Object.entries(metrics)) {
+      const node = this.root?.querySelector(`[data-role="metric-${role}"]`);
+      if (node) node.textContent = String(value);
+    }
+  }
+
   async saveConfig() {
     this.sendBridge("chatbut:update-config", {
       config: this.config,
     });
+  }
+
+  async syncConversationIndex() {
+    if (!this.config || Date.now() - this.lastIndexSync < 1500) return;
+    this.lastIndexSync = Date.now();
+    const currentRows = recentRows().map(({ id, label, kind }) => ({
+      id,
+      label: normalizeConversationLabel(label),
+      kind,
+    }));
+    if (!currentRows.length) return;
+    const existing = Array.isArray(this.config.targeting.indexedChats)
+      ? this.config.targeting.indexedChats
+      : [];
+    const byId = new Map(existing.map((item) => [item.id, item]));
+    let changed = false;
+    for (const item of currentRows) {
+      const prior = byId.get(item.id);
+      if (!prior || prior.label !== item.label || prior.kind !== item.kind) changed = true;
+      byId.set(item.id, item);
+    }
+    const visibleIds = new Set(currentRows.map((item) => item.id));
+    const next = [
+      ...currentRows,
+      ...[...byId.values()].filter((item) => !visibleIds.has(item.id)),
+    ].slice(0, 200);
+    if (!changed && next.length === existing.length) return;
+    this.config.targeting.indexedChats = next;
+    await this.saveConfig();
   }
 
   async enable() {
@@ -433,14 +533,16 @@ class ChatbutRuntime {
     this.pending.clear();
     this.sent = [];
     this.sessionCount = 0;
+    this.sessionChats.clear();
+    this.updateMetrics();
     this.root.querySelector('[data-role="enable"]').hidden = true;
     this.root.querySelector('[data-role="stop"]').hidden = false;
     this.root.querySelector('[data-role="mode"]').textContent = "Enabled";
     this.channel?.postMessage("enabled");
     this.setStatus(
       this.scheduleOverride
-        ? "Enabled with a one-session schedule override. Watching new messages only."
-        : "Enabled. Watching new messages only.",
+        ? "Schedule overridden for this session. Watching new eligible messages."
+        : "Watching new eligible messages.",
       "ok",
     );
     await this.debug?.write("enabled", { conversation: this.originalId });
@@ -455,6 +557,7 @@ class ChatbutRuntime {
     clearInterval(this.timer);
     for (const timeout of this.pending.values()) clearTimeout(timeout);
     this.pending.clear();
+    this.updateMetrics();
     if (this.root) {
       this.root.querySelector('[data-role="enable"]').hidden = false;
       this.root.querySelector('[data-role="stop"]').hidden = true;
@@ -491,7 +594,9 @@ class ChatbutRuntime {
       await this.acceptVisibleDirectRequest();
       await this.revealSpaceInvitation();
       await this.acceptVisibleSpaceInvitation();
+      if (Date.now() - this.lastIndexSync > 30_000) await this.syncConversationIndex();
       for (const row of recentRows()) {
+        if (!mayInspectConversation(this.config, row)) continue;
         const baseline = this.baseline.get(row.id) || this.enableAt;
         if (row.timestamp > Math.max(baseline, this.enableAt) && !this.pending.has(row.id)) {
           await this.queueConversation(row.id);
@@ -511,7 +616,7 @@ class ChatbutRuntime {
       return;
     }
     const conversation = currentConversation();
-    const message = conversation ? latestIncoming(conversation.main) : null;
+    const message = conversation ? latestIncoming(conversation.main, this.selfEmail) : null;
     if (!conversation || !message || (!invitationMessageIsNew && this.processed.has(message.id))) {
       if (previousId) await navigateTo(previousId);
       return;
@@ -534,12 +639,14 @@ class ChatbutRuntime {
     this.processed.add(message.id);
     const timeout = setTimeout(() => this.sendFor(id, vaultName, message.id), delay);
     this.pending.set(id, timeout);
+    this.updateMetrics();
     await this.debug?.write("queued", { id, vaultName, delay });
     if (previousId) await navigateTo(previousId);
   }
 
   async sendFor(id, vaultName, triggerId) {
     this.pending.delete(id);
+    this.updateMetrics();
     if (!this.enabled || (!this.scheduleOverride && !isRuntimeScheduleActive(this.config))) return;
     const now = Date.now();
     if (!maySend({ sessionCount: this.sessionCount, sentTimestamps: this.sent, now })) {
@@ -590,18 +697,36 @@ class ChatbutRuntime {
       if (previousId) await navigateTo(previousId);
       return;
     }
+    const messagesBeforeSend = new Set(
+      [...conversation.main.querySelectorAll(MESSAGE_SELECTOR)].map((group) => group.dataset.id),
+    );
     send[0].click();
+    await this.markAutomatedSend(conversation.main, messagesBeforeSend);
     const sentAt = Date.now();
     if (vaultName === "vault1") state.firstSentAt = sentAt;
     else state.secondSentAt = sentAt;
     this.states.set(id, state);
     this.sent.push(sentAt);
     this.sessionCount += 1;
-    this.setStatus(`Sent ${vaultName === "vault1" ? "acknowledgement" : "follow-up"}. ${this.sessionCount}/20.`, "ok");
+    this.sessionChats.add(id);
+    this.updateMetrics();
+    this.setStatus("Reply sent. Watching new eligible messages.", "ok");
     await this.debug?.write("sent", { id, triggerId, vaultName, fallback, reply });
     if (previousId) await navigateTo(previousId);
     if (stopAfterSend) {
       this.stop("The saved response was sent, then Chatbut stopped because the active LLM connection needs attention.");
+    }
+  }
+
+  async markAutomatedSend(main, previousIds) {
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await sleep(100);
+      const groups = [...main.querySelectorAll(MESSAGE_SELECTOR)].filter(visible);
+      const sentGroup = groups.find((group) => group.dataset.id && !previousIds.has(group.dataset.id));
+      if (!sentGroup) continue;
+      sentGroup.dataset.chatbutSelf = "true";
+      this.processed.add(sentGroup.dataset.id);
+      return;
     }
   }
 
@@ -640,7 +765,11 @@ class ChatbutRuntime {
     if (!conversation || conversation.kind !== "space") return;
     const row = recentRows().find((item) => item.id === conversation.id);
     if (!this.config.targeting.selectedGroups.some((item) => item.id === conversation.id)) {
-      this.config.targeting.selectedGroups.push({ id: conversation.id, label: row?.label || "Accepted Space" });
+      this.config.targeting.selectedGroups.push({
+        id: conversation.id,
+        label: row?.label || "Accepted Space",
+        kind: "space",
+      });
       await this.saveConfig();
     }
     this.baseline.set(conversation.id, 0);
@@ -683,37 +812,6 @@ class ChatbutRuntime {
     await this.debug?.write("space_invitation_found", {});
   }
 
-  renderSearch(query, container) {
-    container.replaceChildren();
-    const ranked = recentRows()
-      .map((row) => ({ ...row, score: fuzzyScore(query, row.label) }))
-      .filter((row) => row.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 6);
-    for (const row of ranked) {
-      const button = this.button(row.label, async () => {
-        if (!this.config) {
-          this.setStatus("Connect Chatbut first.");
-          return;
-        }
-        const kind = conversationKind(row.id);
-        const list = kind === "space"
-          ? this.config.targeting.selectedGroups
-          : this.config.targeting.directExclusions;
-        const existing = list.findIndex((item) => item.id === row.id);
-        if (existing >= 0) {
-          list.splice(existing, 1);
-          this.setStatus(`Removed ${row.label} from ${kind === "space" ? "Spaces" : "DM exclusions"}.`, "ok");
-        } else {
-          list.push({ id: row.id, label: row.label });
-          this.setStatus(`Added ${row.label} to ${kind === "space" ? "Spaces" : "DM exclusions"}.`, "ok");
-        }
-        await this.saveConfig();
-        this.renderSearch(query, container);
-      });
-      container.append(button);
-    }
-  }
 }
 
 new ChatbutRuntime().boot();

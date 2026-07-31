@@ -4,7 +4,8 @@ Date: 2026-07-31
 
 Selected direction: Workbench, warm editorial utility
 
-Source reference: `C:\Users\Wenjian Khor\.codex\generated_images\019fb25d-d13e-7951-a232-edef17b2594b\call_mLt8z22LFOJmhpqdzihdvfpy.png`
+Source references: selected Workbench visual direction and the user-provided
+schedule screenshot.
 
 ## Hallmark preflight
 
@@ -18,9 +19,10 @@ Source reference: `C:\Users\Wenjian Khor\.codex\generated_images\019fb25d-d13e-7
 - Cached findings: `.hallmark/preflight.json`.
 
 The redesign preserved the selected macrostructure, typography, palette,
-spacing, and compact utility density. It extended the system for multi-window
-scheduling, explicit browser-local setup, and multi-provider LLM connection
-states.
+spacing, and compact utility density. This correction pass replaced
+browser-native time controls with explicit 24-hour inputs, made the workbench
+widget preview fully inert, consolidated conversation targeting, and reduced
+the live widget to stationary session controls and metrics.
 
 ## Interaction checks
 
@@ -29,8 +31,8 @@ states.
   setup exists.
 - Window, People, Replies, and Safety navigation is keyboard-accessible and
   visibly stateful.
-- Bookmark copy specifies: drag once into bookmarks, then click while on the
-  Google Chat page.
+- Bookmark copy and its visible label use **💬 Chatbut** and explain the
+  dedicated automation-tab handoff.
 - Multiple schedule windows, outside-window confirmation, invitation toggles,
   target search, response vaults, delay/cooldown, provider validation, active
   provider selection, debug export/reset, and Stop/Enable states are covered.
@@ -41,8 +43,9 @@ states.
 
 ## Responsive and accessibility checks
 
-- Desktop Chrome visual review passed at 1280 CSS pixels.
-- Responsive Chrome checks passed at 320, 375, 414, and 768 CSS pixels.
+- Desktop Chrome visual review passed at the available 1265 CSS-pixel viewport.
+- Responsive Chrome checks passed at 320, 375, 414, and 768 CSS pixels,
+  including the expanded schedule editor.
 - Measured `scrollWidth === clientWidth` at every required mobile/tablet width.
 - Grid tracks carrying flexible content use `minmax(0, 1fr)`.
 - Buttons and navigation labels remain readable without accidental wrapping.

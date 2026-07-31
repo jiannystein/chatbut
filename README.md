@@ -24,8 +24,6 @@
   <img alt="Chrome desktop" src="https://img.shields.io/badge/browser-Chrome%20desktop-b94f25.svg">
 </p>
 
-![Chatbut configuration workbench](app/public/assets/chatbut-configurator.png)
-
 Chatbut is a local-first Chrome bookmarklet for people who receive Google Chat
 messages outside their working hours but cannot install software on their work
 computer. While an enabled Google Chat tab is open, it watches for eligible new
@@ -51,7 +49,8 @@ must stay awake, and Google interface changes can require Chatbut updates.
 | --- | --- |
 | Schedule | Up to 8 recurring time windows on selected days, including overnight windows, in the browser's timezone |
 | Manual override | Warn and allow one-session enable outside the schedule; stop at reload or explicit Stop |
-| Direct messages | Everyone except conversations on the exclusion list |
+| 1:1 direct messages | Everyone except conversations on the exclusion list |
+| Multi-person DMs | Everyone except exclusions, but only for a verified `@mention` or direct reply |
 | Spaces | Selected Spaces only, and only for a verified `@mention` or direct reply |
 | First reply | Random Vault 1 template after a configurable delay; default 30–90 seconds |
 | Follow-up | At most one Vault 2 reply after a configurable cooldown and another eligible message; default 15 minutes |
@@ -76,11 +75,14 @@ Chatbut sends the original saved response.
    already have one.
 3. Review the schedule, people, reply vaults, and safety settings. The default
    window is Monday–Friday, 06:00–08:00 in the browser's timezone.
-4. Drag the orange **Chatbut** button into Chrome's bookmarks bar once.
+4. Drag the orange **💬 Chatbut** button into Chrome's bookmarks bar once.
 5. Select **Open Google Chat**, or use an existing
    `https://chat.google.com/app/home` tab.
-6. While on the Google Chat page, click the **Chatbut** bookmark.
-7. Review the injected status panel and select **Enable**.
+6. While on the Google Chat page, click the **💬 Chatbut** bookmark. The tab
+   becomes the dedicated automation tab and Chatbut opens a clean Google Chat
+   tab for normal use.
+7. In the dedicated automation tab, review the compact status panel and select
+   **Enable**.
 
 The configurator may be closed after the bookmark connects. Chatbut remains
 disabled after Google Chat reloads, Chrome restarts, or the tab closes; click
@@ -118,18 +120,20 @@ GitHub Pages configurator
 
 The runtime uses Google Chat's rendered interface. It does not call
 undocumented Google private APIs. At enable time it records a baseline, then
-coalesces new message bursts, navigates to an eligible conversation, verifies
-the conversation and composer immediately before sending, and restores the
-previously open chat.
+coalesces new message bursts, filters out excluded and non-opted-in
+conversations before navigating, verifies the conversation and composer
+immediately before sending, and restores the previously open chat.
 
-The bookmark opens a short-lived helper at the Chatbut origin. The helper
-transfers a paired `SharedWorker` message port to the exact Google Chat opener
-and then closes. Configuration changes are synchronized while both sides are
-connected. LLM credentials stay inside the Chatbut-origin worker and are
-removed from configuration copies sent to Google Chat.
+The bookmark opens a helper at the Chatbut origin. The helper transfers a
+paired `SharedWorker` message port to the exact Google Chat opener, then turns
+itself into the clean Google Chat tab. The original tab is visibly titled
+**Chatbut automation · Google Chat**. Configuration changes are synchronized
+while both sides are connected. LLM credentials stay inside the
+Chatbut-origin worker and are removed from configuration copies sent to Google
+Chat.
 
-Opening conversations may mark them read or visibly change the interface for a
-moment.
+Eligible conversations may be marked read or visibly change the automation tab
+for a moment. The clean Google Chat tab is left for normal user activity.
 
 ## Privacy and security
 
@@ -162,6 +166,8 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
   exception.
 - A manual user message stops automation for that conversation until the next
   enable.
+- Multi-person DMs require a verified mention or direct reply even when they
+  are not excluded.
 - Spaces must be selected and the triggering message must mention or directly
   reply to the user.
 - Bots, apps, ambiguous identities, unsupported message structures, and
@@ -175,7 +181,7 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 
 - Chrome desktop only for the MVP.
 - Google Chat must remain open and the computer awake.
-- Managed-browser policy may block bookmarklets, popups, SharedWorker,
+- Managed-browser policy may block bookmarklets, helper tabs, SharedWorker,
   IndexedDB, or provider network access.
 - DOM automation is inherently fragile and may break when Google changes the
   Chat interface.
