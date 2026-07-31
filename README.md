@@ -193,6 +193,19 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 - Schedule, enabled state, target identity, and composer are checked again
   immediately before each send.
 
+## Verification
+
+The current production build passed 40 runtime, configuration, targeting,
+provider, and bridge tests plus 4 hosting/package tests on 2026-07-31. Its
+encoded bookmarklet is exactly 32,768 bytes, the enforced distribution limit.
+
+Coordinated desktop-Chrome acceptance confirmed first replies in independent
+1:1 conversations, a post-cooldown second reply, and suppression of immediate
+follow-ups. For an opted-in Space, a message without a mention was ignored;
+verified `@mentions` produced both the first and post-cooldown replies, while
+an immediate eligible follow-up was suppressed. Every successful reply was
+sent as an ordinary message from the signed-in account.
+
 ## Limitations
 
 - Chrome desktop only for the MVP.
