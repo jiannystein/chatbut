@@ -43,26 +43,18 @@ function conversationSection(row) {
 }
 
 function safeLabel(row) {
-  const blocked = /press tab|more options|open in a pop-up|unread|online|offline|away|notifications?|conversation options|^options$/i;
-  const candidates = [];
-  for (const node of row.querySelectorAll('[dir="auto"], [aria-label], [data-tooltip]')) {
-    const values = [
-      node.getAttribute("aria-label"),
-      node.getAttribute("data-tooltip"),
-      node.matches('[dir="auto"]') ? textOf(node) : "",
-    ];
-    for (const raw of values) {
-      const label = normalizeConversationLabel(raw, "");
-      if (!label || label.length > 120 || blocked.test(label) || /^\d{1,2}:\d{2}\b/.test(label)) continue;
-      const score = (node.matches('[dir="auto"]') ? 40 : 0)
-        + (node.hasAttribute("aria-label") ? 10 : 0)
-        - Math.max(0, label.split(/\s+/).length - 8);
-      candidates.push({ label, score });
+  const blocked = /press tab|more options|open in a pop-up|unread|online|offline|away|active|busy|notifications?|conversation options|^conversation$|^options$/i;
+  for (const node of row.querySelectorAll("*")) {
+    if (node.children.length) continue;
+    const label = normalizeConversationLabel(
+      node.getAttribute("aria-label") || node.getAttribute("data-tooltip") || textOf(node),
+      "",
+    );
+    if (label && label.length <= 120 && !blocked.test(label) && !/^\d{1,2}:\d{2}\b/.test(label)) {
+      return label;
     }
   }
-  candidates.sort((a, b) => b.score - a.score || a.label.length - b.label.length);
-  return candidates[0]?.label
-    || normalizeConversationLabel(textOf(row).slice(0, 100), row.dataset.groupId);
+  return normalizeConversationLabel(textOf(row).slice(0, 100), row.dataset.groupId);
 }
 
 function recentRows() {
@@ -109,7 +101,11 @@ function latestIncoming(main, selfEmail) {
   const group = groups.at(-1);
   if (!group) return null;
   const author = group.querySelector("[data-message-id][data-member-id]");
-  if (!author || author.dataset.originGsuiteApp === "1") return null;
+  if (
+    !author
+    || author.dataset.originGsuiteApp === "1"
+    || author.dataset.compareToSelfUser === "true"
+  ) return null;
   const mentionEmails = [...group.querySelectorAll("span[data-user-email]")]
     .map((node) => node.getAttribute("data-user-email"))
     .filter(Boolean);
@@ -342,6 +338,9 @@ class ChatbutRuntime {
       if (!existing.chatbutRuntime?.config) existing.chatbutRuntime?.connectToConfigurator();
       return;
     }
+    if (!window.confirm(
+      "Chatbut will keep this tab open for automation and open a second Google Chat tab for normal use. Leave this tab open after enabling. Continue?",
+    )) return;
     this.render();
     this.root.chatbutRuntime = this;
     this.selfEmail = signedInEmail();
@@ -560,7 +559,7 @@ class ChatbutRuntime {
     if (!composer || composer.dataset.chatbutGuard === "true") return;
     composer.dataset.chatbutGuard = "true";
     composer.addEventListener("beforeinput", (event) => {
-      if (!event.isTrusted || !this.enabled) return;
+      if (!event.isTrusted || !this.enabled || this.automating) return;
       const conversation = currentConversation();
       if (!conversation) return;
       const state = this.states.get(conversation.id) || {};
@@ -701,21 +700,26 @@ class ChatbutRuntime {
       if (previousId) await navigateTo(previousId);
       return;
     }
-    composer.focus();
-    composer.textContent = reply;
-    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: reply }));
-    await sleep(100);
-    if (currentConversation()?.id !== id || send[0].disabled) {
-      composer.textContent = "";
-      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContent" }));
-      if (previousId) await navigateTo(previousId);
-      return;
+    this.automating = true;
+    try {
+      composer.focus();
+      composer.textContent = reply;
+      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: reply }));
+      await sleep(100);
+      if (currentConversation()?.id !== id || send[0].disabled) {
+        composer.textContent = "";
+        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContent" }));
+        if (previousId) await navigateTo(previousId);
+        return;
+      }
+      const messagesBeforeSend = new Set(
+        [...conversation.main.querySelectorAll(MESSAGE_SELECTOR)].map((group) => group.dataset.id),
+      );
+      send[0].click();
+      await this.markAutomatedSend(conversation.main, messagesBeforeSend);
+    } finally {
+      this.automating = false;
     }
-    const messagesBeforeSend = new Set(
-      [...conversation.main.querySelectorAll(MESSAGE_SELECTOR)].map((group) => group.dataset.id),
-    );
-    send[0].click();
-    await this.markAutomatedSend(conversation.main, messagesBeforeSend);
     const sentAt = Date.now();
     if (vaultName === "vault1") state.firstSentAt = sentAt;
     else state.secondSentAt = sentAt;
@@ -740,7 +744,10 @@ class ChatbutRuntime {
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await sleep(100);
       const groups = [...main.querySelectorAll(MESSAGE_SELECTOR)].filter(visible);
-      const sentGroup = groups.find((group) => group.dataset.id && !previousIds.has(group.dataset.id));
+      const newGroups = groups.filter((group) => group.dataset.id && !previousIds.has(group.dataset.id));
+      const sentGroup = newGroups.find(
+        (group) => group.querySelector('[data-compare-to-self-user="true"]'),
+      ) || newGroups[0];
       if (!sentGroup) continue;
       sentGroup.dataset.chatbutSelf = "true";
       this.processed.add(sentGroup.dataset.id);

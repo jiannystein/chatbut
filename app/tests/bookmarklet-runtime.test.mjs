@@ -14,7 +14,11 @@ const runtime = (await readFile(
     "https://jiannystein.github.io/chatbut/chatbut-bridge.html",
   );
 
-function makeDom(url, { popupBlocked = false, html = "<!doctype html><html><head></head><body></body></html>" } = {}) {
+function makeDom(url, {
+  popupBlocked = false,
+  confirmResult = true,
+  html = "<!doctype html><html><head></head><body></body></html>",
+} = {}) {
   const openedWindows = [];
   const bridgeWindow = { closed: false };
   const dom = new JSDOM(html, {
@@ -24,7 +28,11 @@ function makeDom(url, { popupBlocked = false, html = "<!doctype html><html><head
     beforeParse(window) {
       window.alertMessages = [];
       window.alert = (message) => window.alertMessages.push(String(message));
-      window.confirm = () => true;
+      window.confirmMessages = [];
+      window.confirm = (message) => {
+        window.confirmMessages.push(String(message));
+        return confirmResult;
+      };
       window.BroadcastChannel = class {
         postMessage() {}
         close() {}
@@ -53,12 +61,30 @@ test("bookmarklet refuses unsupported pages without injecting controls", () => {
   }
 });
 
+test("bookmarklet explains the two-tab handoff and respects cancellation", () => {
+  const { dom, openedWindows } = makeDom(
+    "https://chat.google.com/app/home",
+    { confirmResult: false },
+  );
+  try {
+    dom.window.eval(runtime);
+    assert.equal(dom.window.document.getElementById("chatbut-runtime"), null);
+    assert.equal(openedWindows.length, 0);
+    assert.match(dom.window.confirmMessages[0], /keep this tab open for automation/i);
+    assert.match(dom.window.confirmMessages[0], /second Google Chat tab/i);
+    assert.match(dom.window.confirmMessages[0], /leave this tab open/i);
+  } finally {
+    dom.window.close();
+  }
+});
+
 test("bookmarklet indexes direct, group-DM, and Space rows with safe labels", async () => {
   const html = `<!doctype html><html><head></head><body>
     <button aria-label="Google Account: Test User (test@example.com)"></button>
     <section aria-label="List of direct messages.">
       <div role="listitem" data-group-id="dm/person" data-display-timestamp="10">
-        <span aria-label="Press tab for more options."></span><span dir="auto">Direct Person</span>
+        <span>Away</span><span>Unread</span><span dir="auto">Direct Person</span>
+        <button>Open in a pop-up</button><button>Options</button>
       </div>
       <div role="listitem" data-group-id="space/group-dm" data-display-timestamp="20">
         <span aria-label="Press tab for more options."></span><span dir="auto">Project Group</span>
@@ -163,6 +189,40 @@ test("delayed sends for several chats are serialized instead of racing navigatio
       "start:dm/two", "end:dm/two",
       "start:dm/three", "end:dm/three",
     ]);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("native self-authorship markers prevent outgoing messages from becoming triggers", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <section aria-label="List of direct messages.">
+      <div role="listitem" data-group-id="dm/person" data-display-timestamp="${Date.now() + 10_000}">
+        <span>Direct Person</span>
+      </div>
+    </section>
+    <main role="main" data-group-id="dm/person">
+      <div role="group" data-id="outgoing-message" data-user-id="self">
+        <span
+          data-message-id="outgoing-message"
+          data-member-id="user/self"
+          data-compare-to-self-user="true"
+        >Automated reply</span>
+      </div>
+    </main>
+  </body></html>`;
+  const { dom } = makeDom("https://chat.google.com/app/home", { html });
+  try {
+    dom.window.eval(runtime);
+    const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
+    runtimeInstance.config = structuredClone(DEFAULT_CONFIG);
+    runtimeInstance.enabled = true;
+    runtimeInstance.enableAt = 0;
+
+    await runtimeInstance.queueConversation("dm/person");
+
+    assert.equal(runtimeInstance.pending.size, 0);
+    assert.equal(runtimeInstance.processed.has("outgoing-message"), false);
   } finally {
     dom.window.close();
   }
