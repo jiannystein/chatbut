@@ -1,8 +1,6 @@
 const status = document.getElementById("bridge-status");
 const [token = "", nonce = ""] = location.hash.slice(1).split(".");
-const openerOrigin = location.hostname === "localhost"
-  ? "http://127.0.0.1:4187"
-  : "https://chat.google.com";
+const openerOrigin = "https://chat.google.com";
 
 function fail(message) {
   status.textContent = message;
