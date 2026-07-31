@@ -1,0 +1,40 @@
+{
+  "scannedAt": "2026-07-31",
+  "framework": {
+    "name": "React",
+    "version": "19.2.0",
+    "build": "Vite 6.4.3",
+    "source": "app/package.json"
+  },
+  "fontStack": {
+    "display": "Newsreader Variable",
+    "body": "Manrope Variable",
+    "source": "app/src/tokens.css"
+  },
+  "palette": {
+    "format": "OKLCH semantic custom properties",
+    "anchors": ["warm paper", "black ink", "orange accent", "green support"],
+    "source": "app/src/tokens.css"
+  },
+  "motion": {
+    "stance": "motion-cut",
+    "reason": "No animation library is installed; short CSS state transitions honor reduced motion."
+  },
+  "spacing": {
+    "scale": "semantic 4px-based custom properties",
+    "source": "app/src/tokens.css"
+  },
+  "preserved": [
+    "Workbench macrostructure",
+    "Newsreader and Manrope typography",
+    "black, orange, and green warm editorial palette",
+    "semantic token system",
+    "compact utility interaction density"
+  ],
+  "introduced": [
+    "multi-window scheduling",
+    "multi-provider LLM connection states",
+    "explicit browser-local first-run state",
+    "responsive and anti-slop verification gates"
+  ]
+}

@@ -65,15 +65,18 @@ export function fuzzyScore(query, label) {
   return 0;
 }
 
-export function redactLogValue(value, apiKey = "") {
+export function redactLogValue(value, secrets = []) {
+  const secretList = (Array.isArray(secrets) ? secrets : [secrets]).filter(Boolean);
   const redacted = JSON.parse(JSON.stringify(value ?? null));
   const visit = (item) => {
     if (!item || typeof item !== "object") return;
     for (const key of Object.keys(item)) {
       if (/api.?key|authorization/i.test(key)) {
         item[key] = "[REDACTED]";
-      } else if (typeof item[key] === "string" && apiKey && item[key].includes(apiKey)) {
-        item[key] = item[key].replaceAll(apiKey, "[REDACTED]");
+      } else if (typeof item[key] === "string") {
+        for (const secret of secretList) {
+          if (item[key].includes(secret)) item[key] = item[key].replaceAll(secret, "[REDACTED]");
+        }
       } else {
         visit(item[key]);
       }

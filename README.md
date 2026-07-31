@@ -5,13 +5,13 @@
 <h1 align="center">Chatbut</h1>
 
 <p align="center">
-  Scheduled, guarded acknowledgements for Google Chat—without installing an app or extension.
+  Thoughtful, scheduled acknowledgements for Google Chat—without installing an app or extension.
 </p>
 
 <p align="center">
   <a href="https://jiannystein.github.io/chatbut/"><strong>Open Chatbut</strong></a>
   ·
-  <a href="#how-it-works">How it works</a>
+  <a href="#quick-start">Quick start</a>
   ·
   <a href="#privacy-and-security">Privacy</a>
   ·
@@ -28,154 +28,161 @@
 
 Chatbut is a local-first Chrome bookmarklet for people who receive Google Chat
 messages outside their working hours but cannot install software on their work
-machine. It watches an open Google Chat tab during a schedule you choose and
-sends a short acknowledge-and-defer response from your own signed-in account.
+computer. While an enabled Google Chat tab is open, it watches for eligible new
+messages and sends a short acknowledge-and-defer reply from the user's own
+signed-in account.
 
-This repository contains a proof of concept. Use non-sensitive test chats first.
+This repository is an experimental proof of concept. Start with non-sensitive
+test conversations.
 
 ## Why a bookmarklet?
 
-A bookmarklet is a saved browser bookmark containing a small program. Chatbut
-uses that model so there is no extension, desktop installer, Google OAuth
-consent, hosted account, or background service.
+A bookmarklet is a browser bookmark that contains a small program. Chatbut
+requires no extension, installer, Google OAuth consent, Chat app, hosted
+account, or background service. The user must deliberately click the bookmark
+and enable each session.
 
-The trade-off is deliberate: Google Chat must remain open, the computer must
-remain awake, and Google interface changes may require Chatbut updates.
+The trade-off is equally deliberate: Google Chat must remain open, the computer
+must stay awake, and Google interface changes can require Chatbut updates.
 
-## What the MVP does
+## MVP features
 
-| Area | Behavior |
+| Area | Tested behavior |
 | --- | --- |
-| Schedule | Selected days and start/end times in the browser's timezone |
+| Schedule | Up to 8 recurring time windows on selected days, including overnight windows, in the browser's timezone |
+| Manual override | Warn and allow one-session enable outside the schedule; stop at reload or explicit Stop |
 | Direct messages | Everyone except conversations on the exclusion list |
-| Spaces | Selected Spaces only; requires an `@mention` or a verified direct reply |
-| First response | Random Vault 1 template after a configurable 30–90 second delay |
-| Follow-up | At most one Vault 2 response after the cooldown and another eligible message |
-| AI adaptation | Optional DeepSeek BYOK; otherwise sends the saved template unchanged |
+| Spaces | Selected Spaces only, and only for a verified `@mention` or direct reply |
+| First reply | Random Vault 1 template after a configurable delay; default 30–90 seconds |
+| Follow-up | At most one Vault 2 reply after a configurable cooldown and another eligible message; default 15 minutes |
+| LLM adaptation | Optional BYOK connections for DeepSeek, OpenAI, Claude, Kimi Global, or Kimi China |
+| Provider safety | Model discovery plus a tiny completion test before a connection is saved; one active provider at a time |
 | Invitations | Separate, off-by-default controls for human 1:1 requests and Space invitations |
-| Safety | Manual enable, schedule enforcement, per-session limits, one active tab, immediate stop |
-| Storage | Versioned plaintext JSON file selected by the user |
-| Logging | None by default; optional rotating local debug files |
+| Storage | Versioned browser-local configuration with explicit JSON import/export |
+| Logging | Off by default; optional browser-local debug log, rotated at 10 MB and exportable on demand |
+| Safety | New messages only, one active instance, send limits, re-verification before every send, immediate Stop |
 
-Chatbut never answers the substance of a message. AI adaptation, when enabled,
-is constrained to a casual, empathetic, workplace-appropriate acknowledgement
-of no more than two sentences. If DeepSeek fails, Chatbut uses the original
-saved template.
+Chatbut never answers the substance of a message. With LLM adaptation enabled,
+the selected saved response remains the intent: the provider may adapt its
+wording to the recent context and sentiment, but the result must remain a
+two-sentence-or-shorter acknowledgement and deferral. Without a usable LLM,
+Chatbut sends the original saved response.
 
 ## Quick start
 
-1. Open the [Chatbut configurator](https://jiannystein.github.io/chatbut/) in
-   desktop Chrome.
-2. Drag the **Chatbut** button to Chrome's bookmarks bar.
-3. Create a local configuration file and review the schedule, targets, response
-   vaults, and safety controls.
-4. If you want AI adaptation, enable it, add your own DeepSeek key, and validate
-   it. AI is optional.
-5. Save the file.
-6. Open Google Chat, click the Chatbut bookmark, and select **Enable**. A
-   short-lived helper links the tabs automatically; Google Chat does not ask
-   for the file again.
+1. Open [Chatbut](https://jiannystein.github.io/chatbut/) in current desktop
+   Chrome.
+2. Select **Create local configuration**. Import a JSON backup instead if you
+   already have one.
+3. Review the schedule, people, reply vaults, and safety settings. The default
+   window is Monday–Friday, 06:00–08:00 in the browser's timezone.
+4. Drag the orange **Chatbut** button into Chrome's bookmarks bar once.
+5. Select **Open Google Chat**, or use an existing
+   `https://chat.google.com/app/home` tab.
+6. While on the Google Chat page, click the **Chatbut** bookmark.
+7. Review the injected status panel and select **Enable**.
 
-Keep both tabs open while Chatbut runs. Reloading or closing either tab breaks
-the session, and reloading or closing Google Chat disables automation. This is
-intentional: the user must start every session explicitly.
+The configurator may be closed after the bookmark connects. Chatbut remains
+disabled after Google Chat reloads, Chrome restarts, or the tab closes; click
+the bookmark again to begin a new session.
+
+LLM adaptation is optional. To add it, open **Replies → LLM connections**,
+choose a provider, enter your key, and select **Validate and save**. Chatbut
+lists the models available to that key, selects a suitable text model, and
+verifies a minimal completion before persisting the connection.
 
 ## How it works
 
 ```text
 GitHub Pages configurator
         │
-        ├── owns the local JSON configuration
-        ├── saves target and debug updates
-        └── provides the generated bookmarklet
+        ├── browser-local IndexedDB configuration and logs
+        ├── JSON import/export
+        └── generated bookmarklet with a random pairing token
                          │
-              short-lived tab bridge
-               + in-memory messages
+                   trusted helper
+                  + SharedWorker
                          │
-                         ▼
-               Google Chat browser tab
+          ┌──────────────┴──────────────┐
+          │                             │
+ Google Chat runtime             optional LLM API
+ rendered DOM only              key stays in worker
+          │                             │
+          └──────── saved/adapted reply ┘
                          │
-             rendered DOM signals only
-                         │
-        ┌────────────────┴────────────────┐
-        │                                 │
- saved response                  optional DeepSeek
-        │                        wording adaptation
-        └────────────────┬────────────────┘
-                         ▼
-             re-verify target + composer
+             target + composer re-check
                          │
                          ▼
-              normal message from user
+            normal message from the user
 ```
 
-The runtime uses the rendered Google Chat interface; it does not call
-undocumented Google private network APIs. It records a baseline at enable time,
-coalesces message bursts, navigates to an eligible conversation, verifies the
-conversation again immediately before sending, and restores the chat that was
-previously open.
+The runtime uses Google Chat's rendered interface. It does not call
+undocumented Google private APIs. At enable time it records a baseline, then
+coalesces new message bursts, navigates to an eligible conversation, verifies
+the conversation and composer immediately before sending, and restores the
+previously open chat.
+
+The bookmark opens a short-lived helper at the Chatbut origin. The helper
+transfers a paired `SharedWorker` message port to the exact Google Chat opener
+and then closes. Configuration changes are synchronized while both sides are
+connected. LLM credentials stay inside the Chatbut-origin worker and are
+removed from configuration copies sent to Google Chat.
 
 Opening conversations may mark them read or visibly change the interface for a
 moment.
 
-When clicked in Google Chat, the paired bookmark opens a short-lived helper on
-the configurator origin. It transfers a `SharedWorker` message port to Google
-Chat, then closes. The port relays configuration, target changes, and debug
-records only to the open configurator paired by a random local token. The
-configuration remains in memory in Google Chat and is not written to its local
-storage. File reads, file writes, and optional debug-log writes stay in the
-configurator tab.
-
 ## Privacy and security
 
-- The configuration and optional logs stay in files selected on the user's
-  computer. Chatbut has no backend, account system, analytics, or telemetry.
-- The selected configuration is transferred in memory to the connected Google
-  Chat page for the active tab session. It is not persisted on the Google Chat
-  origin, but it is available to page code while the bookmarklet is running.
-- The optional DeepSeek API key is stored in plaintext in the configuration
-  file. Anyone or any process that can read the file can read the key.
-- When AI adaptation is enabled, the configured 3–10 recent text messages and
-  a selected response template are sent directly from the browser to DeepSeek.
-- When AI is disabled, no chat content is sent to DeepSeek.
-- Debug logging is off by default. When enabled, logs may contain full message
-  context; credentials and authorization headers are redacted and files rotate
-  at 10 MB.
-- Local storage is not automatically safe on a shared or managed computer.
-  Organizational data-handling policy still applies.
+- Configuration and optional logs stay in this Chrome profile. Chatbut has no
+  backend, account system, analytics, telemetry, or cloud sync.
+- API keys are stored as plaintext browser data for this POC and are included
+  in exported JSON backups. Anyone or any process with access to the Chrome
+  profile or backup can read them.
+- When adaptation is enabled, the selected template and the configured 3–10
+  recent text messages are sent directly from the Chatbut-origin worker to the
+  active provider.
+- When adaptation is disabled, no conversation text is sent to an LLM.
+- Imported LLM connections are marked **Needs attention** and must be
+  revalidated in the current Chrome profile.
+- A credential or model failure falls back to the saved response for the
+  current message, marks the connection **Needs attention**, and stops
+  automation. A transient provider failure falls back and continues.
+- Debug mode may record full message context. Credentials and authorization
+  headers are redacted, logs rotate at 10 MB, and **Start new** clears the
+  current browser-local log.
+- Local-only does not automatically mean policy-approved. Confirm your
+  organization's data-handling and external-LLM rules.
 
-See [SECURITY.md](SECURITY.md) before testing with workplace conversations.
+Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 
 ## Safety boundaries
 
 - Only messages detected after the current enable time are eligible. A message
   attached to an invitation accepted during the session is the explicit
   exception.
-- A manual user edit in a conversation stops automation for that conversation
-  until the next enable.
-- A Space must be selected and its message must mention or directly reply to
-  the user.
-- Bots, apps, uncertain identities, ambiguous composers, and unsupported
-  message structures are skipped.
+- A manual user message stops automation for that conversation until the next
+  enable.
+- Spaces must be selected and the triggering message must mention or directly
+  reply to the user.
+- Bots, apps, ambiguous identities, unsupported message structures, and
+  uncertain reply targets are skipped.
 - Chatbut stops after 20 automatic replies in a session or 5 in a rolling
   five-minute period.
-- The configured schedule and conversation identity are checked again before
-  every send.
+- Schedule, enabled state, target identity, and composer are checked again
+  immediately before each send.
 
 ## Limitations
 
 - Chrome desktop only for the MVP.
-- The configurator must remain open when the bookmark is clicked in Google
-  Chat. Chrome must allow Chatbut's short-lived helper popup.
-- Both tabs must remain open and the computer awake.
-- Managed-browser policy may block bookmarklets, popups, configurator file
-  access, or DeepSeek.
-- Browser DOM automation is inherently fragile and can break after a Google
-  Chat interface update.
-- Direct-reply detection is fail-closed: Chatbut skips a message unless it can
-  verify the reply target.
-- Invitation discovery depends on the English Google Chat interface in this
-  POC.
+- Google Chat must remain open and the computer awake.
+- Managed-browser policy may block bookmarklets, popups, SharedWorker,
+  IndexedDB, or provider network access.
+- DOM automation is inherently fragile and may break when Google changes the
+  Chat interface.
+- Direct-reply detection fails closed when the target cannot be verified.
+- Invitation discovery currently targets the English Google Chat interface.
+- Chrome does not expose a normal filesystem path for browser-local storage.
+  JSON export is the explicit backup and transfer path.
 - Microsoft Teams is not implemented yet.
 
 ## Local development
@@ -186,25 +193,26 @@ Requirements: Node.js 24 and desktop Chrome.
 cd app
 npm ci
 npm test
-npm run build
 npm run test:sites
+npm run build
 npm run dev
 ```
 
-`npm run build:bookmarklet` bundles readable source into a self-contained,
-encoded bookmarklet and fails if the artifact exceeds the 32 KB budget.
+`npm run build:bookmarklet` bundles the readable source into the bookmark
+artifact and fails if the encoded result exceeds 32 KB.
 
-## Repository structure
+## Repository map
 
 ```text
 .
 ├── app/
-│   ├── src/                    # React configurator and shared behavior
-│   │   └── bookmarklet/        # Readable bookmarklet runtime and pure logic
-│   ├── scripts/                # Deterministic bookmarklet/Sites builds
-│   ├── tests/                  # Scheduling, state, safety, and packaging tests
-│   └── public/                 # Logo and generated bookmarklet artifacts
+│   ├── src/                    # React workbench and configuration model
+│   │   └── bookmarklet/        # Readable Google Chat runtime and pure logic
+│   ├── public/                 # Bridge worker, assets, generated bookmarklet
+│   ├── scripts/                # Deterministic bookmarklet and hosting builds
+│   └── tests/                  # Schedule, targeting, runtime, provider, hosting
 ├── .github/workflows/          # Test-gated GitHub Pages deployment
+├── .hallmark/                  # Cached design-system preflight
 ├── plan.md                     # Product decisions and acceptance criteria
 └── SECURITY.md                 # POC security guidance
 ```
@@ -212,14 +220,13 @@ encoded bookmarklet and fails if the artifact exceeds the 32 KB budget.
 ## Project status
 
 Chatbut is an experimental POC intended to improve response experience, not a
-supported Google integration. Review [plan.md](plan.md) for the complete product
-decisions, known risks, and acceptance criteria.
+supported Google integration. It is not affiliated with, endorsed by, or
+sponsored by Google, Google Chat, Microsoft, Microsoft Teams, DeepSeek, OpenAI,
+Anthropic, or Moonshot AI.
 
-Chatbut is not affiliated with, endorsed by, or sponsored by Google, Google
-Chat, Microsoft, Microsoft Teams, or DeepSeek. Google Chat and Chrome are
-trademarks of Google LLC. This project took structural inspiration from the
-author's earlier bookmarklet utility, InstaUnfollow, but uses different
-automation, safety, privacy, and product design.
+The project took structural inspiration from the author's earlier bookmarklet
+utility, InstaUnfollow, while using separate automation, privacy, safety, and
+design decisions.
 
 ## License
 

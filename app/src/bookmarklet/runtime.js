@@ -1,5 +1,4 @@
-import { isScheduleActive, normalizeConfig, validateConfig } from "../config.js";
-import { adaptResponse, validateDeepSeekKey } from "../deepseek.js";
+import { isRuntimeScheduleActive, validateRuntimeConfig } from "./runtime-config.js";
 import {
   fuzzyScore,
   isTargetAllowed,
@@ -137,7 +136,10 @@ class BridgeDebugWriter {
     this.send("chatbut:debug", {
       at: new Date().toISOString(),
       event,
-      details: redactLogValue(details, this.config.ai.apiKey),
+      details: redactLogValue(
+        details,
+        this.config.llm.connections.map((connection) => connection.apiKey),
+      ),
     });
   }
 }
@@ -153,7 +155,9 @@ class ChatbutRuntime {
     this.connectionTimeout = null;
     this.debugReady = false;
     this.debug = null;
+    this.bridgeRequests = new Map();
     this.enabled = false;
+    this.scheduleOverride = false;
     this.enableAt = 0;
     this.baseline = new Map();
     this.processed = new Set();
@@ -185,7 +189,23 @@ class ChatbutRuntime {
   }
 
   handlePortMessage(event) {
+    if (event.data?.type === "chatbut:config-changed" && event.data.config) {
+      this.config = event.data.config;
+      return;
+    }
     if (event.data?.nonce !== this.connectionNonce) return;
+    if (event.data?.requestId && this.bridgeRequests.has(event.data.requestId)) {
+      const pending = this.bridgeRequests.get(event.data.requestId);
+      this.bridgeRequests.delete(event.data.requestId);
+      clearTimeout(pending.timer);
+      if (pending.successTypes.includes(event.data.type)) pending.resolve(event.data);
+      else {
+        const error = new Error(String(event.data.message || "The local provider bridge failed."));
+        error.fatal = Boolean(event.data.fatal);
+        pending.reject(error);
+      }
+      return;
+    }
     if (event.data.type === "chatbut:error") {
       window.clearTimeout(this.connectionTimeout);
       this.setStatus(String(event.data.message || "The configurator could not connect."));
@@ -193,7 +213,7 @@ class ChatbutRuntime {
     }
     if (event.data.type !== "chatbut:config") return;
     window.clearTimeout(this.connectionTimeout);
-    this.config = normalizeConfig(event.data.config);
+    this.config = event.data.config;
     this.configName = String(event.data.fileName || "local configuration");
     this.debugReady = Boolean(event.data.debugReady);
     this.debug = this.config.debug.enabled
@@ -204,6 +224,23 @@ class ChatbutRuntime {
     this.setStatus(`Connected to ${this.configName}. Enable when ready.`, "ok");
   }
 
+  requestBridge(type, payload, successTypes, timeoutMs = 45_000) {
+    return new Promise((resolve, reject) => {
+      if (!this.bridgePort) {
+        reject(new Error("The local provider bridge is not connected."));
+        return;
+      }
+      const requestId = globalThis.crypto?.randomUUID?.()
+        || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const timer = setTimeout(() => {
+        this.bridgeRequests.delete(requestId);
+        reject(new Error("The local provider request timed out."));
+      }, timeoutMs);
+      this.bridgeRequests.set(requestId, { resolve, reject, timer, successTypes });
+      this.sendBridge(type, { ...payload, requestId });
+    });
+  }
+
   requestConfig() {
     this.bridgePort?.postMessage({
       type: "chatbut:request-config",
@@ -212,7 +249,7 @@ class ChatbutRuntime {
     window.clearTimeout(this.connectionTimeout);
     this.connectionTimeout = window.setTimeout(() => {
       if (!this.config) {
-        this.setStatus("No configurator replied. Keep Chatbut open, then retry.");
+        this.setStatus("No local configuration was found. Return to Chatbut, create one, then retry.");
       }
     }, 6000);
   }
@@ -325,7 +362,7 @@ class ChatbutRuntime {
     search.append(searchLabel, input, results);
     const note = document.createElement("p");
     note.className = "cb-mini";
-    note.textContent = "Keep Chatbut open.";
+    note.textContent = "The configurator tab may be closed after setup.";
     main.append(status, actions, search, note);
     this.root.append(header, main);
     document.body.append(this.root);
@@ -350,28 +387,38 @@ class ChatbutRuntime {
 
   async saveConfig() {
     this.sendBridge("chatbut:update-config", {
-      config: normalizeConfig(this.config),
+      config: this.config,
     });
   }
 
   async enable() {
-    const validation = validateConfig(this.config);
+    const validation = validateRuntimeConfig(this.config);
     if (!validation.valid) {
       this.setStatus(validation.errors.join(" "));
       return;
     }
     this.config = validation.config;
-    if (!isScheduleActive(this.config)) {
-      this.setStatus("Outside your schedule. Review it and retry.");
-      return;
+    if (!isRuntimeScheduleActive(this.config)) {
+      if (!window.confirm("You are outside the configured schedule. Enable anyway until you stop Chatbut or reload this page?")) {
+        this.setStatus("Stayed disabled. Review the schedule or enable again to use a one-session override.");
+        return;
+      }
+      this.scheduleOverride = true;
+    } else {
+      this.scheduleOverride = false;
     }
     try {
-      if (this.config.ai.enabled) {
-        this.setStatus("Checking the DeepSeek key…");
-        await validateDeepSeekKey(this.config.ai.apiKey);
-      }
-      if (this.config.debug.enabled && !this.debugReady) {
-        throw new Error("Choose the debug folder in the configurator before enabling.");
+      if (this.config.llm.enabled) {
+        this.setStatus("Checking the active LLM connection…");
+        const result = await this.requestBridge("chatbut:validate-active", {}, ["chatbut:active-valid"]);
+        const connection = this.config.llm.connections.find(
+          (item) => item.providerId === this.config.llm.activeProviderId,
+        );
+        if (connection) {
+          connection.model = result.model;
+          connection.status = "validated";
+          connection.error = "";
+        }
       }
     } catch (error) {
       this.setStatus(`Enable stopped: ${error.message}`);
@@ -390,7 +437,12 @@ class ChatbutRuntime {
     this.root.querySelector('[data-role="stop"]').hidden = false;
     this.root.querySelector('[data-role="mode"]').textContent = "Enabled";
     this.channel?.postMessage("enabled");
-    this.setStatus("Enabled. Watching new messages only.", "ok");
+    this.setStatus(
+      this.scheduleOverride
+        ? "Enabled with a one-session schedule override. Watching new messages only."
+        : "Enabled. Watching new messages only.",
+      "ok",
+    );
     await this.debug?.write("enabled", { conversation: this.originalId });
     this.attachManualGuard();
     this.timer = setInterval(() => this.tick(), 3500);
@@ -399,6 +451,7 @@ class ChatbutRuntime {
 
   stop(reason) {
     this.enabled = false;
+    this.scheduleOverride = false;
     clearInterval(this.timer);
     for (const timeout of this.pending.values()) clearTimeout(timeout);
     this.pending.clear();
@@ -428,7 +481,7 @@ class ChatbutRuntime {
 
   async tick() {
     if (!this.enabled || this.busy) return;
-    if (!isScheduleActive(this.config)) {
+    if (!this.scheduleOverride && !isRuntimeScheduleActive(this.config)) {
       this.stop("The scheduled window closed. Enable again in the next window.");
       return;
     }
@@ -487,7 +540,7 @@ class ChatbutRuntime {
 
   async sendFor(id, vaultName, triggerId) {
     this.pending.delete(id);
-    if (!this.enabled || !isScheduleActive(this.config)) return;
+    if (!this.enabled || (!this.scheduleOverride && !isRuntimeScheduleActive(this.config))) return;
     const now = Date.now();
     if (!maySend({ sessionCount: this.sessionCount, sentTimestamps: this.sent, now })) {
       this.stop("Safety limit reached. Enable again in the next scheduled window.");
@@ -505,16 +558,18 @@ class ChatbutRuntime {
     if (!template) return;
     let reply = template;
     let fallback = false;
-    if (this.config.ai.enabled) {
+    let stopAfterSend = false;
+    if (this.config.llm.enabled) {
       try {
-        reply = normalizeDraft(await adaptResponse({
-          apiKey: this.config.ai.apiKey,
+        const result = await this.requestBridge("chatbut:adapt", {
           template,
-          messages: recentContext(conversation.main, this.config.ai.recentMessageCount),
-          language: this.config.ai.language,
-        }), template);
+          messages: recentContext(conversation.main, this.config.llm.recentMessageCount),
+          language: this.config.llm.language,
+        }, ["chatbut:adapted"]);
+        reply = normalizeDraft(result.text, template);
       } catch (error) {
         fallback = true;
+        stopAfterSend = Boolean(error.fatal);
         await this.debug?.write("ai_fallback", { id, message: error.message });
       }
     }
@@ -545,6 +600,9 @@ class ChatbutRuntime {
     this.setStatus(`Sent ${vaultName === "vault1" ? "acknowledgement" : "follow-up"}. ${this.sessionCount}/20.`, "ok");
     await this.debug?.write("sent", { id, triggerId, vaultName, fallback, reply });
     if (previousId) await navigateTo(previousId);
+    if (stopAfterSend) {
+      this.stop("The saved response was sent, then Chatbut stopped because the active LLM connection needs attention.");
+    }
   }
 
   async acceptVisibleDirectRequest() {
