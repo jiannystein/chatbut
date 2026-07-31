@@ -155,8 +155,8 @@ State is per conversation and per enable session.
    cooldown, default 1 minute and configurable from 1–5 minutes.
 7. Vault 2 never sends merely because the cooldown elapsed.
 8. A manual user message stops automation for that conversation until the next
-   enable. Automated composer activity and native outgoing-message groups must
-   not set this state.
+   enable. Automated composer activity and outgoing groups rendered with the
+   localized `You` author label must not set this state.
 9. Disabling and re-enabling starts a new session.
 10. Delayed sends are serialized so simultaneous eligible chats cannot race
     each other while the automation tab navigates.
