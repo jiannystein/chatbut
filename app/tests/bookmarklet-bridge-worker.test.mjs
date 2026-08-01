@@ -144,6 +144,7 @@ test("bridge worker serves paired browser-local config without a configurator ta
   assert.equal(runtime.sent.at(-1).nonce, "nonce-123");
   assert.equal(runtime.sent.at(-1).config.version, 3);
   assert.equal(runtime.sent.at(-1).config.platform, "googleChat");
+  assert.equal(runtime.sent.at(-1).config.presence, "none");
   assert.equal(runtime.sent.at(-1).latestRelease, "0.3.0");
   assert.equal("apiKey" in runtime.sent.at(-1).config.llm.connections[0], false);
   assert.equal(unrelated.sent.at(-1).type, "chatbut:error");
@@ -153,6 +154,7 @@ test("bridge worker serves paired browser-local config without a configurator ta
     config: {
       ...storedConfig,
       platform: "googleChat",
+      presence: "away",
       targeting: storedConfig.platforms.googleChat.targeting,
       llm: {
         ...storedConfig.llm,
@@ -163,6 +165,7 @@ test("bridge worker serves paired browser-local config without a configurator ta
   });
   await waitFor(() => configurator.sent.at(-1)?.type === "chatbut:config-changed");
   assert.equal(configurator.sent.at(-1).type, "chatbut:config-changed");
+  assert.equal(indexedDB.stores.state.get("configuration").config.platforms.googleChat.presence, "none");
   assert.equal(indexedDB.stores.state.get("configuration").config.platforms.googleChat.invitations.autoAcceptDirect, true);
   assert.equal(
     indexedDB.stores.state.get("configuration").config.llm.connections[0].apiKey,
@@ -216,9 +219,12 @@ test("Google Chat and Teams share one atomic five-send lease window", async () =
   teams.receive({ type: "chatbut:request-config", nonce: "teams-config" });
   await waitFor(() => google.sent.at(-1)?.type === "chatbut:config" && teams.sent.at(-1)?.type === "chatbut:config");
   assert.equal(google.sent.at(-1).config.platform, "googleChat");
+  assert.equal(google.sent.at(-1).config.presence, "none");
   assert.ok(Array.isArray(google.sent.at(-1).config.targeting.selectedGroups));
-  assert.equal(google.sent.at(-1).widgetCss, "");
+  assert.match(google.sent.at(-1).widgetCss, /border-radius:10px/);
+  assert.match(google.sent.at(-1).widgetCss, /main\[hidden\]/);
   assert.equal(teams.sent.at(-1).config.platform, "teams");
+  assert.equal(teams.sent.at(-1).config.presence, "none");
   assert.ok(Array.isArray(teams.sent.at(-1).config.targeting.selectedChannels));
   assert.match(teams.sent.at(-1).widgetCss, /border-radius:10px/);
   assert.match(teams.sent.at(-1).widgetCss, /button:focus-visible/);
