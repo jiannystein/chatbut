@@ -11,6 +11,11 @@ app/design-responsive-*.png
 app/AGENTS.md
 app/.hallmark/
 
+# Local LLM handoffs and working notes
+*.md
+!README.md
+!**/README.md
+
 # Local configuration and debug data
 *.chatbut
 chatbut.config.json

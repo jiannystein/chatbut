@@ -22,6 +22,7 @@ const targeting = {
     { id: "space/excluded-group-dm", label: "Excluded group DM" },
   ],
   selectedGroups: [{ id: "space/allowed", label: "Allowed" }],
+  selectedChannels: [{ id: "19:channel@thread.skype", label: "Channel" }],
 };
 
 test("random delay remains within inclusive configured bounds", () => {
@@ -69,6 +70,12 @@ test("targeting applies separate direct, group-DM, and Space policies", () => {
   assert.equal(isTargetAllowed({ targeting }, {
     id: "space/other", kind: "space", mentionedSelf: true,
   }), false);
+  assert.equal(isTargetAllowed({ targeting }, {
+    id: "19:channel@thread.skype", kind: "channel", repliedToSelf: true,
+  }), true);
+  assert.equal(isTargetAllowed({ targeting }, {
+    id: "19:other@thread.skype", kind: "channel", mentionedSelf: true,
+  }), false);
 });
 
 test("runtime prefilter avoids opening excluded or non-opted-in conversations", () => {
@@ -77,6 +84,8 @@ test("runtime prefilter avoids opening excluded or non-opted-in conversations", 
   assert.equal(mayInspectConversation({ targeting }, { id: "space/group-dm", kind: "group-direct" }), true);
   assert.equal(mayInspectConversation({ targeting }, { id: "space/other", kind: "space" }), false);
   assert.equal(mayInspectConversation({ targeting }, { id: "space/allowed", kind: "space" }), true);
+  assert.equal(mayInspectConversation({ targeting }, { id: "19:channel@thread.skype", kind: "channel" }), true);
+  assert.equal(mayInspectConversation({ targeting }, { id: "19:other@thread.skype", kind: "channel" }), false);
 });
 
 test("conversation classification uses the Google Chat sidebar section", () => {

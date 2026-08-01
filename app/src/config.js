@@ -17,9 +17,10 @@ export const PROVIDER_IDS = [
 ];
 
 export const MAX_SCHEDULE_WINDOWS = 8;
+export const PLATFORM_IDS = ["googleChat", "teams"];
 
 export const DEFAULT_CONFIG = Object.freeze({
-  version: 2,
+  version: 3,
   schedule: {
     days: [1, 2, 3, 4, 5],
     windows: [{ start: "06:00", end: "08:00" }],
@@ -30,16 +31,32 @@ export const DEFAULT_CONFIG = Object.freeze({
     maximumSeconds: 10,
     followUpMinutes: 1,
   },
-  targeting: {
-    directMode: "everyone-except",
-    directExclusions: [],
-    groupMode: "selected",
-    selectedGroups: [],
-    indexedChats: [],
-  },
-  invitations: {
-    autoAcceptDirect: false,
-    autoAcceptSpaces: false,
+  platforms: {
+    googleChat: {
+      targeting: {
+        directMode: "everyone-except",
+        directExclusions: [],
+        groupMode: "selected",
+        selectedGroups: [],
+        indexedChats: [],
+      },
+      invitations: {
+        autoAcceptDirect: false,
+        autoAcceptSpaces: false,
+      },
+    },
+    teams: {
+      targeting: {
+        directMode: "everyone-except",
+        directExclusions: [],
+        groupMode: "mentions-and-replies",
+        selectedChannels: [],
+        indexedChats: [],
+      },
+      invitations: {
+        autoAcceptDirect: false,
+      },
+    },
   },
   responses: {
     vault1: [
@@ -91,11 +108,13 @@ function cleanTargetList(value, limit = 100, { requireKind = false } = {}) {
   return value
     .filter((item) => item && typeof item === "object")
     .map((item) => {
-      const kind = ["direct", "group-direct", "space"].includes(item.kind) ? item.kind : "";
+      const kind = ["direct", "group-direct", "space", "channel"].includes(item.kind) ? item.kind : "";
+      const parentId = typeof item.parentId === "string" ? item.parentId.trim().slice(0, 320) : "";
       return {
         id: String(item.id ?? "").trim(),
         label: String(item.label ?? "").trim(),
         ...(kind ? { kind } : {}),
+        ...(parentId ? { parentId } : {}),
       };
     })
     .filter((item) => item.id && item.label && (!requireKind || item.kind))
@@ -182,14 +201,61 @@ function migrateLegacyAi(source) {
   };
 }
 
+function cleanGoogleChatPlatform(platform, legacyTargeting = {}, legacyInvitations = {}) {
+  const source = platform && typeof platform === "object" ? platform : {};
+  const targeting = source.targeting && typeof source.targeting === "object"
+    ? source.targeting
+    : legacyTargeting;
+  const invitations = source.invitations && typeof source.invitations === "object"
+    ? source.invitations
+    : legacyInvitations;
+  return {
+    targeting: {
+      directMode: "everyone-except",
+      directExclusions: cleanTargetList(targeting.directExclusions),
+      groupMode: "selected",
+      selectedGroups: cleanTargetList(targeting.selectedGroups),
+      indexedChats: cleanTargetList(targeting.indexedChats, 200, { requireKind: true })
+        .filter((item) => item.kind !== "channel"),
+    },
+    invitations: {
+      autoAcceptDirect: Boolean(invitations.autoAcceptDirect),
+      autoAcceptSpaces: Boolean(invitations.autoAcceptSpaces),
+    },
+  };
+}
+
+function cleanTeamsPlatform(platform) {
+  const source = platform && typeof platform === "object" ? platform : {};
+  const targeting = source.targeting && typeof source.targeting === "object" ? source.targeting : {};
+  const invitations = source.invitations && typeof source.invitations === "object" ? source.invitations : {};
+  return {
+    targeting: {
+      directMode: "everyone-except",
+      directExclusions: cleanTargetList(targeting.directExclusions)
+        .filter((item) => item.kind !== "space" && item.kind !== "channel"),
+      groupMode: "mentions-and-replies",
+      selectedChannels: cleanTargetList(targeting.selectedChannels)
+        .filter((item) => !item.kind || item.kind === "channel")
+        .map((item) => ({ ...item, kind: "channel" })),
+      indexedChats: cleanTargetList(targeting.indexedChats, 200, { requireKind: true })
+        .filter((item) => item.kind !== "space"),
+    },
+    invitations: {
+      autoAcceptDirect: Boolean(invitations.autoAcceptDirect),
+    },
+  };
+}
+
 export function normalizeConfig(input = {}) {
   const fallback = cloneDefault();
   const source = input && typeof input === "object" ? input : {};
   const schedule = source.schedule && typeof source.schedule === "object" ? source.schedule : {};
   const delays = source.delays && typeof source.delays === "object" ? source.delays : {};
-  const targeting = source.targeting && typeof source.targeting === "object" ? source.targeting : {};
   const responses = source.responses && typeof source.responses === "object" ? source.responses : {};
-  const invitations = source.invitations && typeof source.invitations === "object" ? source.invitations : {};
+  const legacyTargeting = source.targeting && typeof source.targeting === "object" ? source.targeting : {};
+  const legacyInvitations = source.invitations && typeof source.invitations === "object" ? source.invitations : {};
+  const platforms = source.platforms && typeof source.platforms === "object" ? source.platforms : {};
   const llm = source.llm && typeof source.llm === "object" ? source.llm : migrateLegacyAi(source);
   const debug = source.debug && typeof source.debug === "object" ? source.debug : {};
   const legacyTimingDefaults = Number(delays.minimumSeconds) === 30
@@ -223,7 +289,7 @@ export function normalizeConfig(input = {}) {
     : connections[0]?.providerId ?? "";
 
   return {
-    version: 2,
+    version: 3,
     schedule: {
       days,
       windows: cleanScheduleWindows(schedule, fallback),
@@ -241,16 +307,13 @@ export function normalizeConfig(input = {}) {
         ),
       ),
     },
-    targeting: {
-      directMode: "everyone-except",
-      directExclusions: cleanTargetList(targeting.directExclusions),
-      groupMode: "selected",
-      selectedGroups: cleanTargetList(targeting.selectedGroups),
-      indexedChats: cleanTargetList(targeting.indexedChats, 200, { requireKind: true }),
-    },
-    invitations: {
-      autoAcceptDirect: Boolean(invitations.autoAcceptDirect),
-      autoAcceptSpaces: Boolean(invitations.autoAcceptSpaces),
+    platforms: {
+      googleChat: cleanGoogleChatPlatform(
+        platforms.googleChat,
+        legacyTargeting,
+        legacyInvitations,
+      ),
+      teams: cleanTeamsPlatform(platforms.teams),
     },
     responses: {
       vault1: cleanStringList(responses.vault1, 50),

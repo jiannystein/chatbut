@@ -1,7 +1,7 @@
 export const SESSION_REPLY_LIMIT = 20;
 export const ROLLING_REPLY_LIMIT = 5;
 export const ROLLING_REPLY_WINDOW_MS = 5 * 60 * 1000;
-export const CONVERSATION_KINDS = ["direct", "group-direct", "space"];
+export const CONVERSATION_KINDS = ["direct", "group-direct", "space", "channel"];
 
 export function randomDelayMs(minimumSeconds, maximumSeconds, random = Math.random) {
   const minimum = Math.max(1, Math.round(Number(minimumSeconds) || 1));
@@ -40,8 +40,11 @@ export function isTargetAllowed(config, conversation) {
     return !config.targeting.directExclusions.some((item) => item.id === conversation.id)
       && Boolean(conversation.mentionedSelf || conversation.repliedToSelf);
   }
-  if (conversation.kind === "space") {
-    return config.targeting.selectedGroups.some((item) => item.id === conversation.id)
+  if (conversation.kind === "space" || conversation.kind === "channel") {
+    const selected = conversation.kind === "channel"
+      ? config.targeting.selectedChannels
+      : config.targeting.selectedGroups;
+    return Array.isArray(selected) && selected.some((item) => item.id === conversation.id)
       && Boolean(conversation.mentionedSelf || conversation.repliedToSelf);
   }
   return false;
@@ -52,8 +55,11 @@ export function mayInspectConversation(config, conversation) {
   if (conversation.kind === "direct" || conversation.kind === "group-direct") {
     return !config.targeting.directExclusions.some((item) => item.id === conversation.id);
   }
-  if (conversation.kind === "space") {
-    return config.targeting.selectedGroups.some((item) => item.id === conversation.id);
+  if (conversation.kind === "space" || conversation.kind === "channel") {
+    const selected = conversation.kind === "channel"
+      ? config.targeting.selectedChannels
+      : config.targeting.selectedGroups;
+    return Array.isArray(selected) && selected.some((item) => item.id === conversation.id);
   }
   return false;
 }
