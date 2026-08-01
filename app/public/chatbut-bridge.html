@@ -19,7 +19,27 @@
       <h1>Connecting Chatbut</h1>
       <p id="bridge-status">Linking Google Chat to your open configurator…</p>
     </main>
-    <script src="./chatbut-release.js"></script>
-    <script src="./chatbut-bridge.js"></script>
+    <script>
+      (() => {
+        const status = document.getElementById("bridge-status");
+        const version = new URLSearchParams(location.search).get("v") || "";
+        if (!/^\d+\.\d+\.\d+$/.test(version)) {
+          status.textContent = "This Chatbut bookmark is missing its release version. Replace it from Chatbut.";
+          status.dataset.tone = "error";
+          return;
+        }
+        const load = (path, onload) => {
+          const script = document.createElement("script");
+          script.src = `${path}?v=${encodeURIComponent(version)}`;
+          script.onload = onload;
+          script.onerror = () => {
+            status.textContent = "Chatbut could not load its local bridge. Reload Chatbut, replace the bookmark, and retry.";
+            status.dataset.tone = "error";
+          };
+          document.body.append(script);
+        };
+        load("./chatbut-release.js", () => load("./chatbut-bridge.js"));
+      })();
+    </script>
   </body>
 </html>
