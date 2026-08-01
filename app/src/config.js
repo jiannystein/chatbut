@@ -33,6 +33,7 @@ export const DEFAULT_CONFIG = Object.freeze({
   },
   platforms: {
     googleChat: {
+      presence: "none",
       targeting: {
         directMode: "everyone-except",
         directExclusions: [],
@@ -46,6 +47,7 @@ export const DEFAULT_CONFIG = Object.freeze({
       },
     },
     teams: {
+      presence: "none",
       targeting: {
         directMode: "everyone-except",
         directExclusions: [],
@@ -210,6 +212,7 @@ function cleanGoogleChatPlatform(platform, legacyTargeting = {}, legacyInvitatio
     ? source.invitations
     : legacyInvitations;
   return {
+    presence: ["active", "dnd", "away"].includes(source.presence) ? source.presence : "none",
     targeting: {
       directMode: "everyone-except",
       directExclusions: cleanTargetList(targeting.directExclusions),
@@ -230,6 +233,7 @@ function cleanTeamsPlatform(platform) {
   const targeting = source.targeting && typeof source.targeting === "object" ? source.targeting : {};
   const invitations = source.invitations && typeof source.invitations === "object" ? source.invitations : {};
   return {
+    presence: ["available", "busy", "away"].includes(source.presence) ? source.presence : "none",
     targeting: {
       directMode: "everyone-except",
       directExclusions: cleanTargetList(targeting.directExclusions)

@@ -13,6 +13,7 @@ import { prepareImportedConfig } from "../src/file-store.js";
 import {
   formatRuntimeCountdown,
   nextRuntimeWindowStart,
+  runtimeWindowEnd,
   validateRuntimeConfig,
 } from "../src/bookmarklet/runtime-config.js";
 import { isNewerRelease, RELEASE_VERSION } from "../src/release.js";
@@ -189,6 +190,29 @@ test("invitation options are independently configurable and default off", () => 
   assert.equal(normalized.platforms.teams.invitations.autoAcceptDirect, false);
 });
 
+test("presence defaults off and normalizes per platform", () => {
+  assert.equal(normalizeConfig(DEFAULT_CONFIG).platforms.googleChat.presence, "none");
+  assert.equal(normalizeConfig(DEFAULT_CONFIG).platforms.teams.presence, "none");
+  const normalized = normalizeConfig({
+    ...DEFAULT_CONFIG,
+    platforms: {
+      googleChat: { ...DEFAULT_CONFIG.platforms.googleChat, presence: "dnd" },
+      teams: { ...DEFAULT_CONFIG.platforms.teams, presence: "busy" },
+    },
+  });
+  assert.equal(normalized.platforms.googleChat.presence, "dnd");
+  assert.equal(normalized.platforms.teams.presence, "busy");
+  const invalid = normalizeConfig({
+    ...DEFAULT_CONFIG,
+    platforms: {
+      googleChat: { ...DEFAULT_CONFIG.platforms.googleChat, presence: "busy" },
+      teams: { ...DEFAULT_CONFIG.platforms.teams, presence: "dnd" },
+    },
+  });
+  assert.equal(invalid.platforms.googleChat.presence, "none");
+  assert.equal(invalid.platforms.teams.presence, "none");
+});
+
 test("version-2 targeting migrates losslessly while Teams starts fail-closed", () => {
   const migrated = normalizeConfig({
     ...DEFAULT_CONFIG,
@@ -262,10 +286,14 @@ test("the runtime finds the next window and formats total-hour countdowns", () =
     new Date("2026-07-27T16:00:00").toISOString(),
   );
   assert.equal(formatRuntimeCountdown(27 * 3_600_000 + 2_000), "27:00:02");
+  assert.equal(
+    runtimeWindowEnd(config, new Date("2026-07-27T16:30:00")).toISOString(),
+    new Date("2026-07-27T18:00:00").toISOString(),
+  );
 });
 
 test("release comparison is semantic and runtime LLM validation accepts redacted keys", () => {
-  assert.equal(RELEASE_VERSION, "0.3.2");
+  assert.equal(RELEASE_VERSION, "0.3.3");
   assert.equal(isNewerRelease("0.4.0", RELEASE_VERSION), true);
   assert.equal(isNewerRelease("0.2.9", RELEASE_VERSION), false);
   assert.equal(isNewerRelease("not-a-version", RELEASE_VERSION), false);
