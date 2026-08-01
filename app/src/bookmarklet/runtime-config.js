@@ -53,7 +53,7 @@ export function formatRuntimeCountdown(milliseconds) {
 
 export function validateRuntimeConfig(config) {
   const errors = [];
-  if (!config || config.version !== 2) errors.push("Open Chatbut once to upgrade this configuration.");
+  if (!config || config.version !== 3) errors.push("Open Chatbut once to upgrade this configuration.");
   if (!Array.isArray(config?.schedule?.days) || !config.schedule.days.length) errors.push("Select at least one scheduled day.");
   if (!Array.isArray(config?.schedule?.windows) || !config.schedule.windows.length) errors.push("Add at least one response window.");
   if (!config?.responses?.vault1?.length) errors.push("Vault 1 needs at least one response.");

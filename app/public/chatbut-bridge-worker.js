@@ -5,6 +5,10 @@ const LOG_STORE = "logs";
 const CONFIG_KEY = "configuration";
 const LOG_META_KEY = "log-meta";
 const LOCAL_CONFIG_NAME = "Browser-local configuration";
+const ROLLING_SEND_LIMIT = 5;
+const ROLLING_SEND_WINDOW_MS = 5 * 60 * 1000;
+const PLATFORM_IDS = new Set(["googleChat", "teams"]);
+const TEAMS_WIDGET_CSS = "#chatbut-runtime{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:296px;max-width:calc(100% - 24px);font:14px/1.4 Arial,sans-serif;color:#191713;background:#fffaf0;border:1px solid #d5cbbb;border-radius:10px;box-shadow:0 12px 30px #0003;overflow:hidden}#chatbut-runtime *{box-sizing:border-box}#chatbut-runtime header{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1d1b18;color:#fffaf0}#chatbut-runtime header strong{font:700 18px Georgia,serif}#chatbut-runtime header span{margin-left:auto;color:#d8d1c5;font-size:12px}#chatbut-runtime main{display:grid;gap:9px;padding:12px}#chatbut-runtime p{margin:0;color:#625c52}#chatbut-runtime .cb-status{padding:8px;border-left:3px solid #b94f25;background:#f7eee3}#chatbut-runtime [data-tone=ok]{border-color:#287459;background:#e8f2ec}#chatbut-runtime .cb-actions{display:flex;gap:6px}#chatbut-runtime .cb-actions button{flex:1}#chatbut-runtime button{font:inherit;min-height:44px;padding:0 10px;border:1px solid #bcb1a0;border-radius:6px;background:#fffaf0;color:#191713;font-weight:700;cursor:pointer}#chatbut-runtime button:focus-visible{outline:3px solid #b94f25;outline-offset:2px}#chatbut-runtime .cb-primary{background:#b94f25;color:white}#chatbut-runtime .cb-stop{background:#287459;color:white}#chatbut-runtime button:disabled{opacity:.55;cursor:not-allowed}#chatbut-runtime .cb-metrics{display:grid;grid-template-columns:repeat(3,1fr);margin:0;border-block:1px solid #ddd3c5}#chatbut-runtime .cb-metrics div{padding:7px 5px}#chatbut-runtime .cb-metrics div+div{border-left:1px solid #ddd3c5}#chatbut-runtime dt,#chatbut-runtime .cb-mini{color:#746c61;font-size:11px}#chatbut-runtime dd{margin:0;font-size:17px;font-weight:700}#chatbut-runtime .cb-close{padding:0;width:44px;min-height:44px;background:transparent;color:white}";
 const rooms = new Map();
 
 const providers = {
@@ -55,7 +59,13 @@ class ProviderError extends Error {
 }
 
 function roomFor(token) {
-  if (!rooms.has(token)) rooms.set(token, { configurators: new Set(), runtimes: new Set() });
+  if (!rooms.has(token)) {
+    rooms.set(token, {
+      configurators: new Set(),
+      runtimes: new Map(),
+      sendAttempts: [],
+    });
+  }
   return rooms.get(token);
 }
 
@@ -68,9 +78,14 @@ function send(port, message) {
   }
 }
 
-function configForRuntime(config) {
+function configForRuntime(config, platform) {
+  const platformConfig = config.platforms?.[platform];
   return {
     ...config,
+    platform,
+    platforms: undefined,
+    targeting: platformConfig?.targeting ?? {},
+    invitations: platformConfig?.invitations ?? {},
     llm: {
       ...config.llm,
       connections: (config.llm?.connections ?? []).map(({ apiKey: _apiKey, ...connection }) => connection),
@@ -85,21 +100,34 @@ function broadcastConfig(room, config, updatedAt, excludePort = null) {
       room.configurators.delete(port);
     }
   }
-  const runtimeConfig = configForRuntime(config);
-  for (const port of room.runtimes) {
+  for (const [port, platform] of room.runtimes) {
     if (port === excludePort) continue;
+    const runtimeConfig = configForRuntime(config, platform);
     if (!send(port, { type: "chatbut:config-changed", config: runtimeConfig, updatedAt })) {
       room.runtimes.delete(port);
     }
   }
 }
 
-function restoreConnectionSecrets(storedConfig, runtimeConfig) {
+function restoreRuntimeConfig(storedConfig, runtimeConfig, platform) {
   const secrets = new Map(
     (storedConfig.llm?.connections ?? []).map((connection) => [connection.providerId, connection.apiKey]),
   );
   return {
-    ...runtimeConfig,
+    ...storedConfig,
+    version: storedConfig.version,
+    schedule: runtimeConfig.schedule,
+    delays: runtimeConfig.delays,
+    responses: runtimeConfig.responses,
+    debug: runtimeConfig.debug,
+    platforms: {
+      ...storedConfig.platforms,
+      [platform]: {
+        ...storedConfig.platforms?.[platform],
+        targeting: runtimeConfig.targeting,
+        invitations: runtimeConfig.invitations,
+      },
+    },
     llm: {
       ...runtimeConfig.llm,
       connections: (runtimeConfig.llm?.connections ?? []).map((connection) => ({
@@ -108,6 +136,18 @@ function restoreConnectionSecrets(storedConfig, runtimeConfig) {
       })),
     },
   };
+}
+
+function sendLease(room, now = Date.now()) {
+  room.sendAttempts = room.sendAttempts.filter((timestamp) => now - timestamp < ROLLING_SEND_WINDOW_MS);
+  if (room.sendAttempts.length >= ROLLING_SEND_LIMIT) {
+    return {
+      granted: false,
+      retryAfterMs: Math.max(1, ROLLING_SEND_WINDOW_MS - (now - room.sendAttempts[0])),
+    };
+  }
+  room.sendAttempts.push(now);
+  return { granted: true, retryAfterMs: 0 };
 }
 
 function requestResult(request) {
@@ -386,6 +426,7 @@ self.onconnect = (event) => {
   let token = "";
   let room = null;
   let releaseVersion = "";
+  let platform = "";
 
   port.onmessage = async (messageEvent) => {
     const message = messageEvent.data;
@@ -394,14 +435,19 @@ self.onconnect = (event) => {
     if (message.type === "chatbut:register") {
       token = String(message.token ?? "");
       role = message.role;
+      platform = role === "runtime" && PLATFORM_IDS.has(String(message.platform ?? ""))
+        ? String(message.platform)
+        : "";
       releaseVersion = /^\d+\.\d+\.\d+$/.test(String(message.releaseVersion ?? ""))
         ? String(message.releaseVersion)
         : "";
       if (!/^[A-Za-z0-9_-]{32,128}$/.test(token)) return;
       if (role !== "configurator" && role !== "runtime") return;
+      if (role === "runtime" && !platform) return;
       room = roomFor(token);
-      room[role === "configurator" ? "configurators" : "runtimes"].add(port);
-      send(port, { type: "chatbut:registered", role });
+      if (role === "configurator") room.configurators.add(port);
+      else room.runtimes.set(port, platform);
+      send(port, { type: "chatbut:registered", role, platform });
       return;
     }
     if (!room || !role) return;
@@ -422,7 +468,8 @@ self.onconnect = (event) => {
       send(port, {
         type: "chatbut:config",
         nonce: message.nonce,
-        config: configForRuntime(record.config),
+        config: configForRuntime(record.config, platform),
+        widgetCss: platform === "teams" ? TEAMS_WIDGET_CSS : "",
         fileName: LOCAL_CONFIG_NAME,
         debugReady: true,
         latestRelease: releaseVersion,
@@ -433,9 +480,19 @@ self.onconnect = (event) => {
     if (message.type === "chatbut:update-config" && role === "runtime") {
       const next = await saveRecord({
         ...record,
-        config: restoreConnectionSecrets(record.config, message.config),
+        config: restoreRuntimeConfig(record.config, message.config, platform),
       });
       broadcastConfig(room, next.config, next.updatedAt);
+      return;
+    }
+
+    if (message.type === "chatbut:request-send-lease" && role === "runtime") {
+      send(port, {
+        type: "chatbut:send-lease",
+        nonce: message.nonce,
+        requestId: message.requestId,
+        ...sendLease(room),
+      });
       return;
     }
 
@@ -455,6 +512,7 @@ self.onconnect = (event) => {
         at: typeof message.at === "string" ? message.at : new Date().toISOString(),
         event: String(message.event ?? "runtime").slice(0, 100),
         details: redact(message.details, providerSecrets(record.config)),
+        platform,
       }, Number(record.config.debug.maximumLogBytes) || 10_000_000);
       return;
     }

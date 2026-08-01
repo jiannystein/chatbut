@@ -31,7 +31,7 @@ test("normalization constrains values and migrates a legacy DeepSeek config", ()
     },
   });
 
-  assert.equal(normalized.version, 2);
+  assert.equal(normalized.version, 3);
   assert.deepEqual(normalized.schedule.days, [1, 2]);
   assert.deepEqual(normalized.schedule.windows, [{ start: "06:00", end: "08:00" }]);
   assert.equal(normalized.delays.minimumSeconds, 1);
@@ -63,7 +63,7 @@ test("import validation rejects non-Chatbut JSON before it can replace local sta
     /incomplete or corrupt/i,
   );
   const imported = prepareImportedConfig(DEFAULT_CONFIG);
-  assert.equal(imported.version, 2);
+  assert.equal(imported.version, 3);
 });
 
 test("multiple same-day windows are active independently", () => {
@@ -181,17 +181,43 @@ test("imported credentials are retained but require validation in this browser",
 test("invitation options are independently configurable and default off", () => {
   const normalized = normalizeConfig({
     ...DEFAULT_CONFIG,
+    platforms: undefined,
     invitations: { autoAcceptDirect: true, autoAcceptSpaces: false },
   });
-  assert.equal(normalized.invitations.autoAcceptDirect, true);
-  assert.equal(normalized.invitations.autoAcceptSpaces, false);
+  assert.equal(normalized.platforms.googleChat.invitations.autoAcceptDirect, true);
+  assert.equal(normalized.platforms.googleChat.invitations.autoAcceptSpaces, false);
+  assert.equal(normalized.platforms.teams.invitations.autoAcceptDirect, false);
+});
+
+test("version-2 targeting migrates losslessly while Teams starts fail-closed", () => {
+  const migrated = normalizeConfig({
+    ...DEFAULT_CONFIG,
+    version: 2,
+    platforms: undefined,
+    targeting: {
+      directMode: "everyone-except",
+      directExclusions: [{ id: "dm/excluded", label: "Excluded", kind: "direct" }],
+      groupMode: "selected",
+      selectedGroups: [{ id: "space/allowed", label: "Allowed", kind: "space" }],
+      indexedChats: [{ id: "space/allowed", label: "Allowed", kind: "space" }],
+    },
+    invitations: { autoAcceptDirect: true, autoAcceptSpaces: true },
+  });
+  assert.equal(migrated.version, 3);
+  assert.deepEqual(migrated.platforms.googleChat.targeting.directExclusions.map((item) => item.id), ["dm/excluded"]);
+  assert.deepEqual(migrated.platforms.googleChat.targeting.selectedGroups.map((item) => item.id), ["space/allowed"]);
+  assert.equal(migrated.platforms.googleChat.invitations.autoAcceptDirect, true);
+  assert.equal(migrated.platforms.googleChat.invitations.autoAcceptSpaces, true);
+  assert.deepEqual(migrated.platforms.teams.targeting.indexedChats, []);
+  assert.deepEqual(migrated.platforms.teams.targeting.selectedChannels, []);
+  assert.equal(migrated.platforms.teams.invitations.autoAcceptDirect, false);
 });
 
 test("recent conversation index retains only valid classified entries", () => {
   const normalized = normalizeConfig({
     ...DEFAULT_CONFIG,
+    platforms: undefined,
     targeting: {
-      ...DEFAULT_CONFIG.targeting,
       indexedChats: [
         { id: "dm/person", label: "Person", kind: "direct" },
         { id: "space/group", label: "Group", kind: "group-direct" },
@@ -201,7 +227,7 @@ test("recent conversation index retains only valid classified entries", () => {
     },
   });
   assert.deepEqual(
-    normalized.targeting.indexedChats.map((item) => item.kind),
+    normalized.platforms.googleChat.targeting.indexedChats.map((item) => item.kind),
     ["direct", "group-direct", "space"],
   );
 });
@@ -239,13 +265,15 @@ test("the runtime finds the next window and formats total-hour countdowns", () =
 });
 
 test("release comparison is semantic and runtime LLM validation accepts redacted keys", () => {
-  assert.equal(RELEASE_VERSION, "0.2.0");
-  assert.equal(isNewerRelease("0.3.0", RELEASE_VERSION), true);
-  assert.equal(isNewerRelease("0.1.9", RELEASE_VERSION), false);
+  assert.equal(RELEASE_VERSION, "0.3.0");
+  assert.equal(isNewerRelease("0.4.0", RELEASE_VERSION), true);
+  assert.equal(isNewerRelease("0.2.9", RELEASE_VERSION), false);
   assert.equal(isNewerRelease("not-a-version", RELEASE_VERSION), false);
 
   const runtimeConfig = {
     ...DEFAULT_CONFIG,
+    targeting: DEFAULT_CONFIG.platforms.googleChat.targeting,
+    invitations: DEFAULT_CONFIG.platforms.googleChat.invitations,
     llm: {
       ...DEFAULT_CONFIG.llm,
       enabled: true,

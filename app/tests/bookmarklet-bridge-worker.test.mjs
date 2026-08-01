@@ -133,8 +133,8 @@ test("bridge worker serves paired browser-local config without a configurator ta
   connect(workerScope, unrelated);
 
   configurator.receive({ type: "chatbut:register", role: "configurator", token });
-  runtime.receive({ type: "chatbut:register", role: "runtime", token, releaseVersion: "0.2.0" });
-  unrelated.receive({ type: "chatbut:register", role: "runtime", token: "b".repeat(32) });
+  runtime.receive({ type: "chatbut:register", role: "runtime", platform: "googleChat", token, releaseVersion: "0.3.0" });
+  unrelated.receive({ type: "chatbut:register", role: "runtime", platform: "teams", token: "b".repeat(32) });
   runtime.receive({ type: "chatbut:request-config", nonce: "nonce-123" });
   unrelated.receive({ type: "chatbut:request-config", nonce: "nonce-other" });
   await waitFor(() => runtime.sent.at(-1)?.type === "chatbut:config"
@@ -142,8 +142,9 @@ test("bridge worker serves paired browser-local config without a configurator ta
 
   assert.equal(runtime.sent.at(-1).type, "chatbut:config");
   assert.equal(runtime.sent.at(-1).nonce, "nonce-123");
-  assert.equal(runtime.sent.at(-1).config.version, 2);
-  assert.equal(runtime.sent.at(-1).latestRelease, "0.2.0");
+  assert.equal(runtime.sent.at(-1).config.version, 3);
+  assert.equal(runtime.sent.at(-1).config.platform, "googleChat");
+  assert.equal(runtime.sent.at(-1).latestRelease, "0.3.0");
   assert.equal("apiKey" in runtime.sent.at(-1).config.llm.connections[0], false);
   assert.equal(unrelated.sent.at(-1).type, "chatbut:error");
 
@@ -151,6 +152,8 @@ test("bridge worker serves paired browser-local config without a configurator ta
     type: "chatbut:update-config",
     config: {
       ...storedConfig,
+      platform: "googleChat",
+      targeting: storedConfig.platforms.googleChat.targeting,
       llm: {
         ...storedConfig.llm,
         connections: storedConfig.llm.connections.map(({ apiKey: _apiKey, ...connection }) => connection),
@@ -160,7 +163,7 @@ test("bridge worker serves paired browser-local config without a configurator ta
   });
   await waitFor(() => configurator.sent.at(-1)?.type === "chatbut:config-changed");
   assert.equal(configurator.sent.at(-1).type, "chatbut:config-changed");
-  assert.equal(indexedDB.stores.state.get("configuration").config.invitations.autoAcceptDirect, true);
+  assert.equal(indexedDB.stores.state.get("configuration").config.platforms.googleChat.invitations.autoAcceptDirect, true);
   assert.equal(
     indexedDB.stores.state.get("configuration").config.llm.connections[0].apiKey,
     "secret-that-must-stay-in-the-worker",
@@ -169,12 +172,80 @@ test("bridge worker serves paired browser-local config without a configurator ta
   const configuratorMessageCount = configurator.sent.length;
   configurator.receive({
     type: "chatbut:config-app-saved",
-    config: { ...DEFAULT_CONFIG, invitations: { autoAcceptDirect: false, autoAcceptSpaces: true } },
+    config: {
+      ...DEFAULT_CONFIG,
+      platforms: {
+        ...DEFAULT_CONFIG.platforms,
+        googleChat: {
+          ...DEFAULT_CONFIG.platforms.googleChat,
+          invitations: { autoAcceptDirect: false, autoAcceptSpaces: true },
+        },
+      },
+    },
   });
   await waitFor(() => runtime.sent.at(-1)?.type === "chatbut:config-changed"
     && runtime.sent.at(-1)?.config?.invitations?.autoAcceptSpaces === true);
   assert.equal(configurator.sent.length, configuratorMessageCount);
-  assert.equal(indexedDB.stores.state.get("configuration").config.invitations.autoAcceptSpaces, true);
+  assert.equal(indexedDB.stores.state.get("configuration").config.platforms.googleChat.invitations.autoAcceptSpaces, true);
+});
+
+test("Google Chat and Teams share one atomic five-send lease window", async () => {
+  const token = "e".repeat(32);
+  const indexedDB = makeIndexedDb({
+    config: DEFAULT_CONFIG,
+    pairingToken: token,
+    updatedAt: 1,
+  });
+  const workerScope = {};
+  vm.runInNewContext(source, {
+    self: workerScope,
+    indexedDB,
+    fetch: globalThis.fetch,
+    AbortController,
+    TextEncoder,
+    setTimeout,
+    clearTimeout,
+  });
+  const google = new MockPort();
+  const teams = new MockPort();
+  connect(workerScope, google);
+  connect(workerScope, teams);
+  google.receive({ type: "chatbut:register", role: "runtime", platform: "googleChat", token });
+  teams.receive({ type: "chatbut:register", role: "runtime", platform: "teams", token });
+  google.receive({ type: "chatbut:request-config", nonce: "google-config" });
+  teams.receive({ type: "chatbut:request-config", nonce: "teams-config" });
+  await waitFor(() => google.sent.at(-1)?.type === "chatbut:config" && teams.sent.at(-1)?.type === "chatbut:config");
+  assert.equal(google.sent.at(-1).config.platform, "googleChat");
+  assert.ok(Array.isArray(google.sent.at(-1).config.targeting.selectedGroups));
+  assert.equal(google.sent.at(-1).widgetCss, "");
+  assert.equal(teams.sent.at(-1).config.platform, "teams");
+  assert.ok(Array.isArray(teams.sent.at(-1).config.targeting.selectedChannels));
+  assert.match(teams.sent.at(-1).widgetCss, /border-radius:10px/);
+  assert.match(teams.sent.at(-1).widgetCss, /button:focus-visible/);
+
+  for (let index = 0; index < 5; index += 1) {
+    const port = index % 2 ? teams : google;
+    port.receive({
+      type: "chatbut:request-send-lease",
+      nonce: `nonce-${index}`,
+      requestId: `lease-${index}`,
+    });
+  }
+  await waitFor(() => [google, teams].flatMap((port) => port.sent).filter((message) => message.type === "chatbut:send-lease").length === 5);
+  assert.equal(
+    [google, teams].flatMap((port) => port.sent).filter((message) => message.type === "chatbut:send-lease").every((message) => message.granted),
+    true,
+  );
+
+  teams.receive({
+    type: "chatbut:request-send-lease",
+    nonce: "nonce-denied",
+    requestId: "lease-denied",
+  });
+  await waitFor(() => teams.sent.some((message) => message.requestId === "lease-denied"));
+  const denied = teams.sent.find((message) => message.requestId === "lease-denied");
+  assert.equal(denied.granted, false);
+  assert.ok(denied.retryAfterMs > 0);
 });
 
 test("provider validation discovers and tests a ranked model without returning the secret", async () => {

@@ -4,6 +4,16 @@ import test from "node:test";
 import { JSDOM } from "jsdom";
 import { DEFAULT_CONFIG } from "../src/config.js";
 
+function googleRuntimeConfig() {
+  const config = structuredClone(DEFAULT_CONFIG);
+  return {
+    ...config,
+    platform: "googleChat",
+    targeting: config.platforms.googleChat.targeting,
+    invitations: config.platforms.googleChat.invitations,
+  };
+}
+
 const runtimeSource = (await readFile(
   new URL("../public/chatbut-bookmarklet.min.js", import.meta.url),
   "utf8",
@@ -132,7 +142,7 @@ test("bookmarklet indexes direct, group-DM, and Space rows with safe labels", as
       data: {
         type: "chatbut:config",
         nonce,
-        config: structuredClone(DEFAULT_CONFIG),
+        config: googleRuntimeConfig(),
         fileName: "Browser-local configuration",
       },
     });
@@ -181,7 +191,7 @@ test("delayed sends for several chats are serialized instead of racing navigatio
     dom.window.eval(runtime);
     const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
     runtimeInstance.config = {
-      ...structuredClone(DEFAULT_CONFIG),
+      ...googleRuntimeConfig(),
       delays: { minimumSeconds: 1, maximumSeconds: 1, followUpMinutes: 1 },
     };
     runtimeInstance.enabled = true;
@@ -228,7 +238,7 @@ test("the rendered You author label prevents outgoing messages from becoming tri
   try {
     dom.window.eval(runtime);
     const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
-    runtimeInstance.config = structuredClone(DEFAULT_CONFIG);
+    runtimeInstance.config = googleRuntimeConfig();
     runtimeInstance.enabled = true;
     runtimeInstance.enableAt = 0;
 
@@ -264,7 +274,7 @@ test("comparison metadata shared by both authors does not hide an incoming messa
     dom.window.eval(runtime);
     const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
     runtimeInstance.config = {
-      ...structuredClone(DEFAULT_CONFIG),
+      ...googleRuntimeConfig(),
       delays: { minimumSeconds: 1, maximumSeconds: 1, followUpMinutes: 1 },
     };
     runtimeInstance.enabled = true;
@@ -312,9 +322,9 @@ test("a selected Space keeps its classification when its sidebar row becomes hid
     dom.window.eval(runtime);
     const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
     runtimeInstance.config = {
-      ...structuredClone(DEFAULT_CONFIG),
+      ...googleRuntimeConfig(),
       targeting: {
-        ...structuredClone(DEFAULT_CONFIG.targeting),
+        ...structuredClone(DEFAULT_CONFIG.platforms.googleChat.targeting),
         selectedGroups: [{ id: "space/project", label: "Project Space", kind: "space" }],
       },
       delays: { minimumSeconds: 60, maximumSeconds: 60, followUpMinutes: 1 },
@@ -358,7 +368,24 @@ test("a Space reply waits for Google Chat to enable its send control", async () 
       <button aria-label="Send message" disabled>Send</button>
     </main>
   </body></html>`;
-  const { dom } = makeDom("https://chat.google.com/app/home", { html });
+  const { dom, openedWindows, bridgeWindow } = makeDom("https://chat.google.com/app/home", { html });
+  const port = {
+    onmessage: null,
+    start() {},
+    postMessage(message) {
+      if (message.type === "chatbut:request-send-lease") {
+        queueMicrotask(() => port.onmessage({
+          data: {
+            type: "chatbut:send-lease",
+            nonce: message.nonce,
+            requestId: message.requestId,
+            granted: true,
+            retryAfterMs: 0,
+          },
+        }));
+      }
+    },
+  };
   try {
     const main = dom.window.document.querySelector("main");
     const composer = main.querySelector('[role="textbox"]');
@@ -378,11 +405,18 @@ test("a Space reply waits for Google Chat to enable its send control", async () 
       `);
     });
     dom.window.eval(runtime);
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce },
+      origin: "https://jiannystein.github.io",
+      source: bridgeWindow,
+      ports: [port],
+    }));
     const runtimeInstance = dom.window.document.getElementById("chatbut-runtime").chatbutRuntime;
     runtimeInstance.config = {
-      ...structuredClone(DEFAULT_CONFIG),
+      ...googleRuntimeConfig(),
       targeting: {
-        ...structuredClone(DEFAULT_CONFIG.targeting),
+        ...structuredClone(DEFAULT_CONFIG.platforms.googleChat.targeting),
         selectedGroups: [{ id: "space/project", label: "Project Space", kind: "space" }],
       },
     };
@@ -444,7 +478,7 @@ test("bookmarklet receives an in-memory configuration from its trusted helper po
     assert.equal(openedWindows.length, 1);
     assert.equal(openedWindows[0].name, "_blank");
     assert.equal(openedWindows[0].features, undefined);
-    assert.match(openedWindows[0].url, /\.handoff$/);
+    assert.match(openedWindows[0].url, /\.handoff\.googleChat$/);
     const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
     dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
       data: {
@@ -460,10 +494,10 @@ test("bookmarklet receives an in-memory configuration from its trusted helper po
       data: {
         type: "chatbut:config",
         nonce,
-        config: DEFAULT_CONFIG,
+        config: googleRuntimeConfig(),
         fileName: "chatbut.config.json",
         debugReady: true,
-        latestRelease: "0.3.0",
+        latestRelease: "0.4.0",
       },
     });
 
@@ -473,7 +507,7 @@ test("bookmarklet receives an in-memory configuration from its trusted helper po
     assert.equal(root.querySelector('[data-role="enable"]').disabled, true);
     assert.equal(root.querySelector('[data-role="override"]').hidden, false);
     assert.equal(root.querySelector('[data-role="connect"]').hidden, true);
-    assert.match(root.querySelector('[data-role="release"]').textContent, /Update available.*latest v0\.3\.0/i);
+    assert.match(root.querySelector('[data-role="release"]').textContent, /Update available.*latest v0\.4\.0/i);
     assert.equal(root.querySelector('[data-role="metric-replies"]').textContent, "0");
     assert.equal(root.querySelector(".cb-search"), null);
 
@@ -484,7 +518,7 @@ test("bookmarklet receives an in-memory configuration from its trusted helper po
       data: {
         type: "chatbut:config-changed",
         config: {
-          ...structuredClone(DEFAULT_CONFIG),
+          ...googleRuntimeConfig(),
           schedule: {
             ...structuredClone(DEFAULT_CONFIG.schedule),
             days: [0, 1, 2, 3, 4, 5, 6],
@@ -566,7 +600,7 @@ test("bookmarklet revalidates the active LLM connection before enabling", async 
     error: "",
   };
   const config = {
-    ...DEFAULT_CONFIG,
+    ...googleRuntimeConfig(),
     schedule: {
       ...DEFAULT_CONFIG.schedule,
       days: [0, 1, 2, 3, 4, 5, 6],
@@ -617,7 +651,7 @@ test("outside-schedule confirmation creates a one-session override", async () =>
   const port = { onmessage: null, start() {}, postMessage() {} };
   const tomorrow = (new Date().getDay() + 1) % 7;
   const config = {
-    ...DEFAULT_CONFIG,
+    ...googleRuntimeConfig(),
     schedule: {
       ...DEFAULT_CONFIG.schedule,
       days: [tomorrow],
