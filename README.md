@@ -114,7 +114,7 @@ Chatbut sends the original saved response.
 3. Review the schedule, people, reply vaults, and safety settings. The default
    window is Monday–Friday, 06:00–08:00 in the browser's timezone.
 4. Select **Google** or **Teams**, then drag the displayed
-   **💬 Google v0.3.6** or **💬 Teams v0.3.6** button into
+   **💬 Google v0.3.7** or **💬 Teams v0.3.7** button into
    Chrome's bookmarks bar. The bookmarklets are independent; install both if
    you use both platforms.
 5. Select **Open Google Chat** or **Open Teams**. Teams support is limited to
@@ -246,9 +246,9 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 
 ## Verification
 
-The v0.3.6 release passed 71 runtime, adapter, configuration, targeting,
+The v0.3.7 release passed 72 runtime, adapter, configuration, targeting,
 provider, and bridge tests plus 4 hosting/package tests on 2026-08-01. The
-encoded Google Chat bookmarklet is 32,657 bytes and the Teams bookmarklet is
+encoded Google Chat bookmarklet is 32,689 bytes and the Teams bookmarklet is
 32,538 bytes, each against an independently enforced 32,768-byte limit.
 
 Earlier coordinated desktop-Chrome acceptance confirmed Google Chat first
@@ -282,7 +282,9 @@ and lockout. v0.3.5 closes the identity menu through Teams' native profile
 toggle, waits for delayed status updates, reacquires replaced status controls,
 and recognizes Away when Out of office masks its label. v0.3.6 accepts Google
 Chat's current role-button presence trigger as well as its earlier native-button
-markup while retaining unique-visible ambiguity failure. The enable/stop cycle
+markup while retaining unique-visible ambiguity failure. v0.3.7 renders the
+installed version in Google immediately, matching Teams even before the bridge
+connects. The enable/stop cycle
 passed live against Available, Busy, and Away status behavior. Ordinary incoming
 auto-reply, Combined view, opted-in channel, and request acceptance still require
 acceptance.

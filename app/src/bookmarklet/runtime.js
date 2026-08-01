@@ -444,7 +444,7 @@ class ChatbutRuntime {
     stop.addEventListener("click", () => this.stop("Stopped by you."));
     const footer = appendElement(main, "div", "", "", "cb-footer");
     appendElement(footer, "p", "Only new eligible messages · session safety limit 20", "", "cb-mini");
-    appendElement(footer, "p", "", "release", "cb-mini cb-release");
+    appendElement(footer, "p", `Installed bookmark v${RELEASE_VERSION}`, "release", "cb-mini cb-release");
     document.body.append(this.root);
     this.updateMetrics();
   }
