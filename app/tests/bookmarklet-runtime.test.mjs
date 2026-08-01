@@ -9,6 +9,7 @@ function googleRuntimeConfig() {
   return {
     ...config,
     platform: "googleChat",
+    presence: config.platforms.googleChat.presence,
     targeting: config.platforms.googleChat.targeting,
     invitations: config.platforms.googleChat.invitations,
   };
@@ -28,6 +29,7 @@ const runtime = runtimeSource
     "__CHATBUT_BRIDGE_URL__",
     "https://jiannystein.github.io/chatbut/chatbut-bridge.html",
   );
+const widgetCss = "#chatbut-runtime{border-radius:10px}#chatbut-runtime main[hidden]{display:none}";
 
 test("distributed bookmarklet decodes to the generated runtime", () => {
   assert.match(bookmarkletArtifact, /^javascript:/);
@@ -143,6 +145,7 @@ test("bookmarklet indexes direct, group-DM, and Space rows with safe labels", as
         type: "chatbut:config",
         nonce,
         config: googleRuntimeConfig(),
+        widgetCss,
         fileName: "Browser-local configuration",
       },
     });
@@ -495,6 +498,7 @@ test("bookmarklet receives an in-memory configuration from its trusted helper po
         type: "chatbut:config",
         nonce,
         config: googleRuntimeConfig(),
+        widgetCss,
         fileName: "chatbut.config.json",
         debugReady: true,
         latestRelease: "0.4.0",
@@ -627,6 +631,7 @@ test("bookmarklet revalidates the active LLM connection before enabling", async 
         type: "chatbut:config",
         nonce,
         config,
+        widgetCss,
         fileName: "Browser-local configuration",
         debugReady: true,
       },
@@ -672,6 +677,7 @@ test("outside-schedule confirmation creates a one-session override", async () =>
         type: "chatbut:config",
         nonce,
         config,
+        widgetCss,
         fileName: "Browser-local configuration",
         debugReady: true,
       },
@@ -682,6 +688,120 @@ test("outside-schedule confirmation creates a one-session override", async () =>
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(root.chatbutRuntime.scheduleOverride, true);
     assert.match(root.textContent, /Schedule overridden for this session/i);
+    root.chatbutRuntime.stop("Test complete.");
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Google presence applies on enable, locks, resets, and minimize keeps the runtime active", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <button aria-label="Status: Active">Status</button>
+    <div role="menuitem" jsname="pms6R">Automatic</div>
+    <div role="menuitem" jsname="wJfO6e">Do not disturb</div>
+    <div role="menuitem" jsname="PCKjx">Away</div>
+  </body></html>`;
+  const { dom, openedWindows, bridgeWindow } = makeDom("https://chat.google.com/app/home", { html });
+  const port = { onmessage: null, start() {}, postMessage() {} };
+  try {
+    const status = dom.window.document.querySelector('button[aria-label^="Status:"]');
+    dom.window.document.querySelector('[jsname="PCKjx"]').addEventListener("click", () => {
+      status.setAttribute("aria-label", "Status: Away");
+    });
+    dom.window.eval(runtime);
+    const root = dom.window.document.getElementById("chatbut-runtime");
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce },
+      origin: "https://jiannystein.github.io",
+      source: bridgeWindow,
+      ports: [port],
+    }));
+    const config = googleRuntimeConfig();
+    config.presence = "away";
+    config.schedule = { ...config.schedule, days: [0, 1, 2, 3, 4, 5, 6], windows: [{ start: "00:00", end: "00:00" }] };
+    port.onmessage({ data: { type: "chatbut:config", nonce, config, widgetCss, fileName: "Browser-local configuration" } });
+    const select = root.querySelector('[data-role="presence"]');
+    assert.equal(select.value, "away");
+    root.querySelector('[data-role="enable"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(status.getAttribute("aria-label"), "Status: Away");
+    assert.equal(root.chatbutRuntime.enabled, true);
+    assert.equal(select.disabled, true);
+    root.querySelector('[data-role="minimize"]').click();
+    assert.equal(root.querySelector("main").hidden, true);
+    assert.equal(root.chatbutRuntime.enabled, true);
+    root.querySelector('[data-role="minimize"]').click();
+    assert.equal(root.querySelector("main").hidden, false);
+    root.chatbutRuntime.stop("Test complete.");
+    assert.equal(select.disabled, false);
+    assert.equal(select.value, "away");
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Google presence ambiguity stops enable without starting automation", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <button aria-label="Status: Active">One</button><button aria-label="Status: Active">Two</button>
+    <div role="menuitem" jsname="PCKjx">Away</div>
+  </body></html>`;
+  const { dom, openedWindows, bridgeWindow } = makeDom("https://chat.google.com/app/home", { html });
+  const port = { onmessage: null, start() {}, postMessage() {} };
+  try {
+    dom.window.eval(runtime);
+    const root = dom.window.document.getElementById("chatbut-runtime");
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce }, origin: "https://jiannystein.github.io", source: bridgeWindow, ports: [port],
+    }));
+    const config = googleRuntimeConfig();
+    config.presence = "away";
+    config.schedule = { ...config.schedule, days: [0, 1, 2, 3, 4, 5, 6], windows: [{ start: "00:00", end: "00:00" }] };
+    port.onmessage({ data: { type: "chatbut:config", nonce, config, widgetCss } });
+    root.querySelector('[data-role="enable"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(root.chatbutRuntime.enabled, false);
+    assert.equal(root.querySelector('[data-role="presence"]').disabled, false);
+    assert.match(root.querySelector('[data-role="status"]').textContent, /Enable stopped.*presence/i);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Google DND selects a native duration that covers the active response window", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <button aria-label="Status: Active">Status</button>
+    <div role="menuitem" jsname="wJfO6e">Do not disturb</div>
+    <div role="menuitem">30 min</div><div role="menuitem">1 hour</div><div role="menuitem">2 hours</div>
+    <div role="menuitem">4 hours</div><div role="menuitem">8 hours</div><div role="menuitem">24 hours</div>
+  </body></html>`;
+  const { dom, openedWindows, bridgeWindow } = makeDom("https://chat.google.com/app/home", { html });
+  const port = { onmessage: null, start() {}, postMessage() {} };
+  try {
+    const status = dom.window.document.querySelector('button[aria-label^="Status:"]');
+    let clickedDuration = "";
+    for (const duration of [...dom.window.document.querySelectorAll('[role="menuitem"]')].filter((node) => /min|hour/.test(node.textContent))) {
+      duration.addEventListener("click", () => {
+        clickedDuration = duration.textContent;
+        status.setAttribute("aria-label", "Status: Do not disturb");
+      });
+    }
+    dom.window.eval(runtime);
+    const root = dom.window.document.getElementById("chatbut-runtime");
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce }, origin: "https://jiannystein.github.io", source: bridgeWindow, ports: [port],
+    }));
+    const config = googleRuntimeConfig();
+    config.presence = "dnd";
+    config.schedule = { ...config.schedule, days: [0, 1, 2, 3, 4, 5, 6], windows: [{ start: "00:00", end: "00:00" }] };
+    port.onmessage({ data: { type: "chatbut:config", nonce, config, widgetCss } });
+    root.querySelector('[data-role="enable"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    assert.equal(status.getAttribute("aria-label"), "Status: Do not disturb");
+    assert.match(clickedDuration, /^(30 min|1 hour|2 hours|4 hours|8 hours|24 hours)$/);
+    assert.equal(root.chatbutRuntime.enabled, true);
     root.chatbutRuntime.stop("Test complete.");
   } finally {
     dom.window.close();

@@ -2,6 +2,7 @@ import {
   formatRuntimeCountdown,
   isRuntimeScheduleActive,
   nextRuntimeWindowStart,
+  runtimeWindowEnd,
   validateRuntimeConfig,
 } from "./runtime-config.js";
 import {
@@ -41,6 +42,24 @@ function textOf(element) {
 function uniqueVisible(selector, root = document) {
   const matches = [...root.querySelectorAll(selector)].filter(visible);
   return matches.length === 1 ? matches[0] : null;
+}
+
+async function waitUnique(selector, root = document) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await sleep(100);
+    const match = uniqueVisible(selector, root);
+    if (match) return match;
+  }
+  return null;
+}
+
+function appendElement(parent, tag, text = "", role = "", className = "") {
+  const element = document.createElement(tag);
+  element.textContent = text;
+  if (role) element.dataset.role = role;
+  if (className) element.className = className;
+  parent.append(element);
+  return element;
 }
 
 function conversationSection(row) {
@@ -155,7 +174,7 @@ async function navigateTo(id) {
 }
 
 function styleText() {
-  return `#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:296px;max-width:calc(100% - 24px);font:14px/1.4 Arial,sans-serif;color:#191713;background:#fffaf0;border:1px solid #d5cbbb;border-radius:10px;box-shadow:0 12px 30px #0003;overflow:hidden}#${ROOT_ID} *{box-sizing:border-box}#${ROOT_ID} header{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1d1b18;color:#fffaf0}#${ROOT_ID} header strong{font:700 18px Georgia,serif}#${ROOT_ID} header span{margin-left:auto;color:#d8d1c5;font-size:12px}#${ROOT_ID} main{display:grid;gap:9px;padding:12px}#${ROOT_ID} p{margin:0;color:#625c52}#${ROOT_ID} .cb-status{padding:8px;border-left:3px solid #b94f25;background:#f7eee3}#${ROOT_ID} [data-tone=ok]{border-color:#287459;background:#e8f2ec}#${ROOT_ID} .cb-actions{display:flex;gap:6px}#${ROOT_ID} .cb-actions button{flex:1}#${ROOT_ID} button{font:inherit;min-height:38px;padding:0 10px;border:1px solid #bcb1a0;border-radius:6px;background:#fffaf0;color:#191713;font-weight:700;cursor:pointer}#${ROOT_ID} .cb-primary{background:#b94f25;color:white}#${ROOT_ID} .cb-stop{background:#287459;color:white}#${ROOT_ID} button:disabled{opacity:.55;cursor:not-allowed}#${ROOT_ID} .cb-metrics{display:grid;grid-template-columns:repeat(3,1fr);margin:0;border-block:1px solid #ddd3c5}#${ROOT_ID} .cb-metrics div{padding:7px 5px}#${ROOT_ID} .cb-metrics div+div{border-left:1px solid #ddd3c5}#${ROOT_ID} dt,.cb-mini{color:#746c61;font-size:11px}#${ROOT_ID} dd{margin:0;font-size:17px;font-weight:700}#${ROOT_ID} .cb-release[data-tone=warn]{color:#9f2e24;font-weight:700}#${ROOT_ID} .cb-close{padding:0;width:30px;min-height:30px;background:transparent;color:white}`;
+  return `#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;background:white}#${ROOT_ID} button{min-height:44px}`;
 }
 
 class BridgeDebugWriter {
@@ -179,6 +198,7 @@ class BridgeDebugWriter {
 class ChatbutRuntime {
   constructor() {
     this.root = null;
+    this.style = null;
     this.config = null;
     this.connectionNonce = "";
     this.bridgeWindow = null;
@@ -206,6 +226,7 @@ class ChatbutRuntime {
     this.waitingForSchedule = false;
     this.activating = false;
     this.latestRelease = "";
+    this.presenceTouched = false;
     this.busy = false;
     this.sending = false;
     this.sendChain = Promise.resolve();
@@ -234,6 +255,7 @@ class ChatbutRuntime {
         ? new BridgeDebugWriter((type, payload) => this.sendBridge(type, payload), this.config)
         : null;
       this.syncConversationIndex();
+      this.syncPresence();
       if (!this.enabled && !this.root.hidden) this.armSchedule();
       return;
     }
@@ -257,6 +279,11 @@ class ChatbutRuntime {
     }
     if (event.data.type !== "chatbut:config") return;
     window.clearTimeout(this.connectionTimeout);
+    if (!event.data.widgetCss) {
+      this.setStatus("Replace this bookmark from Chatbut.");
+      return;
+    }
+    this.style.textContent = event.data.widgetCss;
     this.config = event.data.config;
     this.latestRelease = String(event.data["latestRelease"] || "");
     const configName = String(event.data.fileName || "local configuration");
@@ -264,6 +291,7 @@ class ChatbutRuntime {
       ? new BridgeDebugWriter((type, payload) => this.sendBridge(type, payload), this.config)
       : null;
     this.root.querySelector('[data-role="connect"]').hidden = true;
+    this.syncPresence();
     this.updateReleaseState();
     this.setStatus(`Connected to ${configName}.`, "ok");
     this.syncConversationIndex();
@@ -368,75 +396,57 @@ class ChatbutRuntime {
     const style = document.createElement("style");
     style.textContent = styleText();
     document.head.append(style);
+    this.style = style;
     this.root = document.createElement("section");
     this.root.id = ROOT_ID;
     this.root.setAttribute("aria-label", "Chatbut controls");
-    const header = document.createElement("header");
-    const title = document.createElement("strong");
-    title.textContent = `Chatbut v${RELEASE_VERSION}`;
-    const mode = document.createElement("span");
-    mode.textContent = "Disabled";
-    mode.dataset.role = "mode";
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "cb-close";
-    close.textContent = "×";
+    const header = appendElement(this.root, "header");
+    appendElement(header, "strong", "Chatbut");
+    appendElement(header, "span", "Disabled", "mode");
+    const windowControls = appendElement(header, "div", "", "", "cb-window");
+    const minimize = appendElement(windowControls, "button", "−", "minimize");
+    minimize.setAttribute("aria-label", "Minimize Chatbut");
+    minimize.setAttribute("aria-expanded", "true");
+    const close = appendElement(windowControls, "button", "×");
     close.setAttribute("aria-label", "Hide Chatbut");
+    minimize.addEventListener("click", () => this.toggleMinimized());
     close.addEventListener("click", () => {
       if (!this.enabled) this.cancelScheduleWait();
       this.root.hidden = true;
     });
-    header.append(title, mode, close);
-    const main = document.createElement("main");
-    const status = document.createElement("p");
-    status.className = "cb-status";
-    status.dataset.role = "status";
-    const actions = document.createElement("div");
-    actions.className = "cb-actions";
-    const connect = this.button("Retry connection", () => this.connectToConfigurator());
-    connect.dataset.role = "connect";
-    const enable = this.button("Enable", () => this.enableNow());
-    enable.className = "cb-primary";
-    enable.dataset.role = "enable";
-    enable.disabled = true;
-    const override = this.button("Enable now", () => this.enableNow());
-    override.dataset.role = "override";
-    override.hidden = true;
-    const stop = this.button("Stop", () => this.stop("Stopped by you."));
-    stop.className = "cb-stop";
-    stop.dataset.role = "stop";
-    stop.hidden = true;
-    actions.append(connect, enable, override, stop);
-    const metrics = document.createElement("dl");
-    metrics.className = "cb-metrics";
-    for (const [role, label] of [["replies", "Replies"], ["chats", "Chats"], ["pending", "Pending"]]) {
-      const metric = document.createElement("div");
-      const term = document.createElement("dt");
-      const value = document.createElement("dd");
-      term.textContent = label;
-      value.textContent = "0";
-      value.dataset.role = `metric-${role}`;
-      metric.append(term, value);
-      metrics.append(metric);
+    const main = appendElement(this.root, "main");
+    appendElement(main, "p", "", "status", "cb-status");
+    const presence = appendElement(main, "label", "Presence", "", "cb-presence");
+    const presenceSelect = appendElement(presence, "select", "", "presence");
+    presenceSelect.setAttribute("aria-label", "Presence");
+    for (const [value, label] of [["none", "No change"], ["active", "Active"], ["dnd", "Do not disturb"], ["away", "Away"]]) {
+      const option = appendElement(presenceSelect, "option", label);
+      option.value = value;
     }
-    const note = document.createElement("p");
-    note.className = "cb-mini";
-    note.textContent = "Only new eligible messages · session safety limit 20";
-    const release = document.createElement("p");
-    release.className = "cb-mini cb-release";
-    release.dataset.role = "release";
-    main.append(status, metrics, actions, note, release);
-    this.root.append(header, main);
+    presenceSelect.addEventListener("change", () => { this.presenceTouched = true; });
+    const metrics = appendElement(main, "dl", "", "", "cb-metrics");
+    for (const [label, role] of [["Replies", "metric-replies"], ["Chats", "metric-chats"], ["Pending", "metric-pending"]]) {
+      const metric = appendElement(metrics, "div");
+      appendElement(metric, "dt", label);
+      appendElement(metric, "dd", "0", role);
+    }
+    const actions = appendElement(main, "div", "", "", "cb-actions");
+    const connect = appendElement(actions, "button", "Retry", "connect");
+    const enable = appendElement(actions, "button", "Enable", "enable", "cb-primary");
+    enable.disabled = true;
+    const override = appendElement(actions, "button", "Enable now", "override");
+    override.hidden = true;
+    const stop = appendElement(actions, "button", "Stop", "stop", "cb-stop");
+    stop.hidden = true;
+    connect.addEventListener("click", () => this.connectToConfigurator());
+    enable.addEventListener("click", () => this.enableNow());
+    override.addEventListener("click", () => this.enableNow());
+    stop.addEventListener("click", () => this.stop("Stopped by you."));
+    const footer = appendElement(main, "div", "", "", "cb-footer");
+    appendElement(footer, "p", "Only new eligible messages · session safety limit 20", "", "cb-mini");
+    appendElement(footer, "p", "", "release", "cb-mini cb-release");
     document.body.append(this.root);
     this.updateMetrics();
-  }
-
-  button(label, handler) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = label;
-    button.addEventListener("click", handler);
-    return button;
   }
 
   setStatus(message, tone = "info") {
@@ -469,6 +479,58 @@ class ChatbutRuntime {
       node.textContent = `Installed bookmark v${RELEASE_VERSION}`;
       delete node.dataset.tone;
     }
+  }
+
+  toggleMinimized() {
+    const main = this.root.querySelector("main");
+    const button = this.root.querySelector('[data-role="minimize"]');
+    main.hidden = !main.hidden;
+    button.textContent = main.hidden ? "+" : "−";
+    button.setAttribute("aria-label", main.hidden ? "Expand Chatbut" : "Minimize Chatbut");
+    button.setAttribute("aria-expanded", String(!main.hidden));
+  }
+
+  syncPresence() {
+    const select = this.root?.querySelector('[data-role="presence"]');
+    if (select && !this.enabled && !this.activating && !this.presenceTouched) {
+      select.value = this.config?.presence || "none";
+    }
+  }
+
+  async applyPresence(scheduleOverride) {
+    const select = this.root.querySelector('[data-role="presence"]');
+    const value = select.value;
+    if (value === "none") return;
+    const control = uniqueVisible('button[aria-label^="Status:"]');
+    if (!control) throw new Error("Google Chat presence control was not found.");
+    control.click();
+    const selector = value === "active" ? '[role="menuitem"][jsname="pms6R"]'
+      : value === "dnd" ? '[role="menuitem"][jsname="wJfO6e"]'
+        : '[role="menuitem"][jsname="PCKjx"]';
+    const item = await waitUnique(selector);
+    if (!item) throw new Error("Google Chat presence menu was ambiguous.");
+    item.click();
+    if (value === "dnd") {
+      const now = new Date();
+      const target = scheduleOverride ? new Date(now.getTime() + 60 * 60 * 1_000) : runtimeWindowEnd(this.config, now);
+      const remainingHours = Math.max(0.5, (target - now) / 3_600_000);
+      const duration = [0.5, 1, 2, 4, 8, 24].find((hours) => hours >= remainingHours) || 24;
+      let durationItem = null;
+      for (let attempt = 0; attempt < 20 && !durationItem; attempt += 1) {
+        await sleep(100);
+        durationItem = [...document.querySelectorAll('[role="menuitem"]')]
+          .filter(visible)
+          .find((node) => textOf(node).startsWith(duration === 0.5 ? "30 min" : `${duration} hour`));
+      }
+      if (!durationItem) throw new Error("Google Chat DND duration was not found.");
+      durationItem.click();
+    }
+    const expected = value === "active" ? /active|automatic/i : value === "dnd" ? /do not disturb/i : /away/i;
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await sleep(100);
+      if (expected.test(control.getAttribute("aria-label") || "")) return;
+    }
+    throw new Error("Google Chat did not confirm the requested presence.");
   }
 
   cancelScheduleWait() {
@@ -593,7 +655,10 @@ class ChatbutRuntime {
       return;
     }
     this.activating = true;
+    const presence = this.root.querySelector('[data-role="presence"]');
+    presence.disabled = true;
     try {
+      await this.applyPresence(scheduleOverride);
       if (this.config.llm.enabled) {
         this.setStatus("Checking the active LLM connection…");
         const result = await this.requestBridge("chatbut:validate-active", {}, ["chatbut:active-valid"]);
@@ -609,6 +674,7 @@ class ChatbutRuntime {
     } catch (error) {
       this.setStatus(`Enable stopped: ${error.message}`);
       this.activating = false;
+      presence.disabled = false;
       return;
     }
     this.cancelScheduleWait();
@@ -652,6 +718,10 @@ class ChatbutRuntime {
     this.pending.clear();
     this.updateMetrics();
     if (this.root) {
+      const presence = this.root.querySelector('[data-role="presence"]');
+      presence.disabled = false;
+      this.presenceTouched = false;
+      presence.value = this.config?.presence || "none";
       this.root.querySelector('[data-role="enable"]').hidden = false;
       this.root.querySelector('[data-role="stop"]').hidden = true;
       this.root.querySelector('[data-role="mode"]').textContent = "Disabled";

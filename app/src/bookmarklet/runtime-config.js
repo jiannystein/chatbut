@@ -41,6 +41,28 @@ export function nextRuntimeWindowStart(config, date = new Date()) {
   return next;
 }
 
+export function runtimeWindowEnd(config, date = new Date()) {
+  if (!isRuntimeScheduleActive(config, date)) return new Date(date.getTime() + 60 * 60 * 1_000);
+  const current = date.getHours() * 60 + date.getMinutes();
+  const ends = [];
+  for (const window of config.schedule.windows) {
+    const start = minutes(window.start);
+    const end = minutes(window.end);
+    const today = config.schedule.days.includes(date.getDay());
+    const previous = config.schedule.days.includes((date.getDay() + 6) % 7);
+    const active = start === end ? today
+      : start < end ? today && current >= start && current < end
+        : (today && current >= start) || (previous && current < end);
+    if (!active) continue;
+    const target = new Date(date);
+    if (start === end) target.setDate(target.getDate() + 1);
+    else if (start > end && current >= start) target.setDate(target.getDate() + 1);
+    target.setHours(Math.floor(end / 60), end % 60, 0, 0);
+    ends.push(target);
+  }
+  return new Date(Math.min(...ends.map((item) => item.getTime())));
+}
+
 export function formatRuntimeCountdown(milliseconds) {
   const seconds = Math.max(0, Math.ceil(Number(milliseconds) / 1_000));
   const hours = Math.floor(seconds / 3_600);

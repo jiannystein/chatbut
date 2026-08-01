@@ -8,7 +8,7 @@ const LOCAL_CONFIG_NAME = "Browser-local configuration";
 const ROLLING_SEND_LIMIT = 5;
 const ROLLING_SEND_WINDOW_MS = 5 * 60 * 1000;
 const PLATFORM_IDS = new Set(["googleChat", "teams"]);
-const TEAMS_WIDGET_CSS = "#chatbut-runtime{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:296px;max-width:calc(100% - 24px);font:14px/1.4 Arial,sans-serif;color:#191713;background:#fffaf0;border:1px solid #d5cbbb;border-radius:10px;box-shadow:0 12px 30px #0003;overflow:hidden}#chatbut-runtime *{box-sizing:border-box}#chatbut-runtime header{display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1d1b18;color:#fffaf0}#chatbut-runtime header strong{font:700 18px Georgia,serif}#chatbut-runtime header span{margin-left:auto;color:#d8d1c5;font-size:12px}#chatbut-runtime main{display:grid;gap:9px;padding:12px}#chatbut-runtime p{margin:0;color:#625c52}#chatbut-runtime .cb-status{padding:8px;border-left:3px solid #b94f25;background:#f7eee3}#chatbut-runtime [data-tone=ok]{border-color:#287459;background:#e8f2ec}#chatbut-runtime .cb-actions{display:flex;gap:6px}#chatbut-runtime .cb-actions button{flex:1}#chatbut-runtime button{font:inherit;min-height:44px;padding:0 10px;border:1px solid #bcb1a0;border-radius:6px;background:#fffaf0;color:#191713;font-weight:700;cursor:pointer}#chatbut-runtime button:focus-visible{outline:3px solid #b94f25;outline-offset:2px}#chatbut-runtime .cb-primary{background:#b94f25;color:white}#chatbut-runtime .cb-stop{background:#287459;color:white}#chatbut-runtime button:disabled{opacity:.55;cursor:not-allowed}#chatbut-runtime .cb-metrics{display:grid;grid-template-columns:repeat(3,1fr);margin:0;border-block:1px solid #ddd3c5}#chatbut-runtime .cb-metrics div{padding:7px 5px}#chatbut-runtime .cb-metrics div+div{border-left:1px solid #ddd3c5}#chatbut-runtime dt,#chatbut-runtime .cb-mini{color:#746c61;font-size:11px}#chatbut-runtime dd{margin:0;font-size:17px;font-weight:700}#chatbut-runtime .cb-close{padding:0;width:44px;min-height:44px;background:transparent;color:white}";
+const WIDGET_CSS = `#chatbut-runtime{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:304px;max-width:calc(100% - 24px);overflow:hidden;border:1px solid #d5cbbb;border-radius:10px;background:#fffaf0;color:#191713;box-shadow:0 12px 30px #0003;font:14px/1.4 Arial,sans-serif}#chatbut-runtime *{box-sizing:border-box}#chatbut-runtime header{display:flex;align-items:center;gap:8px;min-height:52px;padding:4px 4px 4px 12px;background:#1d1b18;color:#fffaf0}#chatbut-runtime header strong{font:700 18px Georgia,serif}#chatbut-runtime header [data-role=mode]{margin-left:auto;color:#d8d1c5;font-size:12px}#chatbut-runtime .cb-window{display:flex}#chatbut-runtime main{display:grid;gap:9px;padding:12px}#chatbut-runtime main[hidden]{display:none}#chatbut-runtime p{margin:0;color:#625c52}#chatbut-runtime .cb-status{padding:8px;border-left:3px solid #b94f25;background:#f7eee3}#chatbut-runtime [data-tone=ok]{border-color:#287459;background:#e8f2ec}#chatbut-runtime .cb-presence{display:grid;grid-template-columns:1fr auto;align-items:center;gap:8px;color:#746c61;font-size:11px;font-weight:700}#chatbut-runtime select{max-width:156px;min-height:44px;padding:0 30px 0 10px;border:1px solid #bcb1a0;border-radius:6px;background:#fffaf0;color:#191713;font:inherit;font-weight:700}#chatbut-runtime .cb-actions{display:flex;gap:6px}#chatbut-runtime .cb-actions button{flex:1}#chatbut-runtime button{min-height:44px;padding:0 10px;border:1px solid #bcb1a0;border-radius:6px;background:#fffaf0;color:#191713;font:inherit;font-weight:700;cursor:pointer}#chatbut-runtime button:focus-visible,#chatbut-runtime select:focus-visible{outline:3px solid #b94f25;outline-offset:2px}#chatbut-runtime .cb-primary{background:#b94f25;color:white}#chatbut-runtime .cb-stop{background:#287459;color:white}#chatbut-runtime button:disabled,#chatbut-runtime select:disabled{opacity:.55;cursor:not-allowed}#chatbut-runtime .cb-metrics{display:grid;grid-template-columns:repeat(3,1fr);margin:0;border-block:1px solid #ddd3c5}#chatbut-runtime .cb-metrics div{padding:7px 5px}#chatbut-runtime .cb-metrics div+div{border-left:1px solid #ddd3c5}#chatbut-runtime dt,#chatbut-runtime .cb-mini{color:#746c61;font-size:11px}#chatbut-runtime dd{margin:0;font-size:17px;font-weight:700}#chatbut-runtime .cb-footer{display:grid;gap:2px}#chatbut-runtime .cb-release[data-tone=warn]{color:#9f2e24;font-weight:700}#chatbut-runtime .cb-window button{width:44px;min-height:44px;padding:0;border-color:transparent;background:transparent;color:white;font-size:18px}`;
 const rooms = new Map();
 
 const providers = {
@@ -84,6 +84,7 @@ function configForRuntime(config, platform) {
     ...config,
     platform,
     platforms: undefined,
+    presence: platformConfig?.presence ?? "none",
     targeting: platformConfig?.targeting ?? {},
     invitations: platformConfig?.invitations ?? {},
     llm: {
@@ -124,6 +125,7 @@ function restoreRuntimeConfig(storedConfig, runtimeConfig, platform) {
       ...storedConfig.platforms,
       [platform]: {
         ...storedConfig.platforms?.[platform],
+        presence: storedConfig.platforms?.[platform]?.presence ?? "none",
         targeting: runtimeConfig.targeting,
         invitations: runtimeConfig.invitations,
       },
@@ -469,7 +471,7 @@ self.onconnect = (event) => {
         type: "chatbut:config",
         nonce: message.nonce,
         config: configForRuntime(record.config, platform),
-        widgetCss: platform === "teams" ? TEAMS_WIDGET_CSS : "",
+        widgetCss: WIDGET_CSS,
         fileName: LOCAL_CONFIG_NAME,
         debugReady: true,
         latestRelease: releaseVersion,
