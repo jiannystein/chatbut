@@ -50,7 +50,7 @@ function appendElement(parent, tag, text = "", role = "", className = "") {
 }
 
 function styleText() {
-  return `#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;width:296px;font:14px Arial;background:#fffaf0;color:#191713;border:1px solid}#${ROOT_ID} header,#${ROOT_ID} .cb-actions{display:flex}#${ROOT_ID} header{padding:10px;background:#1d1b18;color:white}#${ROOT_ID} header span{margin-left:auto}#${ROOT_ID} main{padding:12px}#${ROOT_ID} p{margin:8px 0}#${ROOT_ID} button{min-height:38px}#${ROOT_ID} .cb-actions button{flex:1}`;
+  return `#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;background:white}#${ROOT_ID} button{min-height:38px}`;
 }
 
 class TeamsRuntime {
@@ -294,6 +294,7 @@ class TeamsRuntime {
   }
 
   armSchedule() {
+    const wasWaiting = this.waitingForSchedule;
     this.cancelScheduleWait();
     if (!this.config || this.enabled) return;
     const validation = validateRuntimeConfig(this.config);
@@ -306,6 +307,10 @@ class TeamsRuntime {
       return;
     }
     if (isRuntimeScheduleActive(this.config)) {
+      if (wasWaiting) {
+        this.activate(false);
+        return;
+      }
       enable.disabled = false;
       enable.textContent = "Enable";
       override.hidden = true;
@@ -313,19 +318,33 @@ class TeamsRuntime {
       this.setStatus("Ready. Keep this Teams tab open.", "ok");
       return;
     }
+    let next = Date.now() + 60_000;
+    next -= next % 60_000;
+    const limit = next + 7 * 24 * 60 * 60_000;
+    while (next <= limit && !isRuntimeScheduleActive(this.config, new Date(next))) next += 60_000;
+    if (next > limit) {
+      enable.disabled = true;
+      override.hidden = true;
+      this.setStatus("No upcoming window was found. Review the schedule in Chatbut.");
+      return;
+    }
     this.waitingForSchedule = true;
     enable.disabled = true;
     override.hidden = false;
     this.root.querySelector('[data-role="mode"]').textContent = "Waiting";
-    enable.textContent = "Waiting";
     this.setStatus("Waiting for the next response window. Leave this tab open.");
     const update = () => {
       if (!this.waitingForSchedule || this.enabled) return;
       if (isRuntimeScheduleActive(this.config)) {
         this.cancelScheduleWait();
         this.activate(false);
+        return;
       }
+      const seconds = Math.max(0, Math.ceil((next - Date.now()) / 1_000));
+      const hours = String(Math.floor(seconds / 3_600)).padStart(2, "0");
+      enable.textContent = `Starts in ${hours}:${new Date(seconds * 1_000).toISOString().slice(14, 19)}`;
     };
+    update();
     this.countdownTimer = setInterval(update, 1_000);
   }
 
@@ -353,7 +372,8 @@ class TeamsRuntime {
       for (const item of items) {
         const prior = byId.get(item.id);
         if (!prior) byId.set(item.id, item);
-        else if (prior.element !== item.element) byId.set(item.id, { ...prior, unread: prior.unread || item.unread, ambiguous: true, element: null });
+        else if (prior.kind !== item.kind) byId.set(item.id, { ...prior, ambiguous: true, element: null });
+        else byId.set(item.id, { ...item, unread: prior.unread || item.unread, ambiguous: prior.ambiguous || item.ambiguous });
       }
     };
     merge(teamsConversationRows());
@@ -631,10 +651,10 @@ class TeamsRuntime {
         const active = activeTeamsConversation();
         const composer = teamsComposer();
         if (active?.id === SELF_CHAT_ID && composer && !composer.draft) {
-          this.selfTestArmed = false;
           const row = rows.find((item) => item.id === SELF_CHAT_ID);
-          if (row && !row.ambiguous && mayInspectConversation(this.config, row) && !this.pending.has(row.id)) {
-            await this.queueConversation(row);
+          if (row && !row.ambiguous) {
+            this.selfTestArmed = false;
+            if (mayInspectConversation(this.config, row) && !this.pending.has(row.id)) await this.queueConversation(row);
           }
         }
       }
@@ -709,14 +729,23 @@ class TeamsRuntime {
     await this.restoreContext(previous);
   }
 
-  clearComposer(composer) {
-    composer.textContent = "";
-    composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContent" }));
+  clearComposer(composer, text = "") {
+    const editor = composer.ckeditorInstance;
+    if (editor) {
+      editor.setData("");
+      if (text) editor.model.change((writer) => editor.model.insertContent(writer.createText(text)));
+      return;
+    }
+    composer.textContent = text;
+    composer.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      inputType: text ? "insertText" : "deleteContent",
+      data: text || null,
+    }));
   }
 
   async sendFor(item, vaultName, triggerId) {
-    this.pending.delete(item.id);
-    this.updateMetrics();
+    try {
     if (!this.enabled || (!this.scheduleOverride && !isRuntimeScheduleActive(this.config))) return;
     if (this.sessionCount >= 20) {
       this.stop("Safety limit reached. Enable again in the next scheduled window.");
@@ -767,23 +796,20 @@ class TeamsRuntime {
       }
     }
     if (!this.enabled) return;
-    const { composer, send } = composerState;
+    const { composer } = composerState;
     this.automating = true;
     try {
       composer.focus();
-      composer.textContent = reply;
-      composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: reply }));
+      this.clearComposer(composer, reply);
       await sleep(700);
       const ready = teamsComposer();
       if (
         activeTeamsConversation()?.id !== item.id
         || !ready
-        || ready.composer !== composer
-        || ready.send !== send
         || !ready.ready
         || ready.draft !== reply
       ) {
-        this.clearComposer(composer);
+        this.clearComposer(ready?.composer || composer);
         this.writeDebug("skip", { id: item.id, reason: "send_not_ready" });
         await this.restoreContext(previous);
         return;
@@ -792,13 +818,13 @@ class TeamsRuntime {
       try {
         lease = await this.requestBridge("chatbut:request-send-lease", {}, ["chatbut:send-lease"], 6_000);
       } catch (error) {
-        this.clearComposer(composer);
+        this.clearComposer(ready.composer);
         this.writeDebug("skip", { id: item.id, reason: "send_lease_unavailable", message: error.message });
         await this.restoreContext(previous);
         return;
       }
       if (!lease.granted) {
-        this.clearComposer(composer);
+        this.clearComposer(ready.composer);
         this.setStatus("Global safety limit reached. Waiting for the five-minute window to clear.");
         this.writeDebug("skip", { id: item.id, reason: "global_send_limit", retryAfterMs: lease.retryAfterMs });
         await this.restoreContext(previous);
@@ -808,7 +834,7 @@ class TeamsRuntime {
         [...document.querySelectorAll('[data-tid="chat-pane-message"][data-mid]')]
           .map((message) => message.getAttribute("data-mid")),
       );
-      send.click();
+      ready.send.click();
       let sentId = "";
       for (let attempt = 0; attempt < 30; attempt += 1) {
         await sleep(150);
@@ -850,6 +876,10 @@ class TeamsRuntime {
     this.writeDebug("sent", { id: item.id, triggerId, vaultName, fallback, reply });
     await this.restoreContext(previous);
     if (stopAfterSend) this.stop("The saved response was sent, then Chatbut stopped because the active LLM connection needs attention.");
+    } finally {
+      this.pending.delete(item.id);
+      this.updateMetrics();
+    }
   }
 
   async acceptVisibleRequest() {
