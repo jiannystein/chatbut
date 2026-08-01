@@ -696,7 +696,7 @@ test("outside-schedule confirmation creates a one-session override", async () =>
 
 test("Google presence applies on enable, locks, resets, and minimize keeps the runtime active", async () => {
   const html = `<!doctype html><html><head></head><body>
-    <button aria-label="Status: Active">Status</button>
+    <div role="button" tabindex="0" aria-label="Status: Active">Status</div>
     <div role="menuitem" jsname="pms6R">Automatic</div>
     <div role="menuitem" jsname="wJfO6e">Do not disturb</div>
     <div role="menuitem" jsname="PCKjx">Away</div>
@@ -704,7 +704,7 @@ test("Google presence applies on enable, locks, resets, and minimize keeps the r
   const { dom, openedWindows, bridgeWindow } = makeDom("https://chat.google.com/app/home", { html });
   const port = { onmessage: null, start() {}, postMessage() {} };
   try {
-    const status = dom.window.document.querySelector('button[aria-label^="Status:"]');
+    const status = dom.window.document.querySelector('[aria-label^="Status:"]');
     dom.window.document.querySelector('[jsname="PCKjx"]').addEventListener("click", () => {
       status.setAttribute("aria-label", "Status: Away");
     });
@@ -743,7 +743,7 @@ test("Google presence applies on enable, locks, resets, and minimize keeps the r
 
 test("Google presence ambiguity stops enable without starting automation", async () => {
   const html = `<!doctype html><html><head></head><body>
-    <button aria-label="Status: Active">One</button><button aria-label="Status: Active">Two</button>
+    <button aria-label="Status: Active">One</button><div role="button" tabindex="0" aria-label="Status: Active">Two</div>
     <div role="menuitem" jsname="PCKjx">Away</div>
   </body></html>`;
   const { dom, openedWindows, bridgeWindow } = makeDom("https://chat.google.com/app/home", { html });
@@ -771,7 +771,7 @@ test("Google presence ambiguity stops enable without starting automation", async
 
 test("Google DND selects a native duration that covers the active response window", async () => {
   const html = `<!doctype html><html><head></head><body>
-    <button aria-label="Status: Active">Status</button>
+    <div role="button" tabindex="0" aria-label="Status: Active">Status</div>
     <div role="menuitem" jsname="wJfO6e">Do not disturb</div>
     <div role="menuitem">30 min</div><div role="menuitem">1 hour</div><div role="menuitem">2 hours</div>
     <div role="menuitem">4 hours</div><div role="menuitem">8 hours</div><div role="menuitem">24 hours</div>
@@ -779,7 +779,7 @@ test("Google DND selects a native duration that covers the active response windo
   const { dom, openedWindows, bridgeWindow } = makeDom("https://chat.google.com/app/home", { html });
   const port = { onmessage: null, start() {}, postMessage() {} };
   try {
-    const status = dom.window.document.querySelector('button[aria-label^="Status:"]');
+    const status = dom.window.document.querySelector('[aria-label^="Status:"]');
     let clickedDuration = "";
     for (const duration of [...dom.window.document.querySelectorAll('[role="menuitem"]')].filter((node) => /min|hour/.test(node.textContent))) {
       duration.addEventListener("click", () => {
