@@ -39,7 +39,7 @@ function runBridge(mode = "", platform = "googleChat") {
       close() { calls.close += 1; },
       setTimeout(callback) { callback(); },
     },
-    CHATBUT_RELEASE_VERSION: "0.3.6",
+    CHATBUT_RELEASE_VERSION: "0.3.7",
   };
   vm.runInNewContext(source, context);
   return { calls, status };
@@ -51,10 +51,10 @@ test("handoff bridge becomes a clean Google Chat tab after transferring the port
   assert.equal(calls.replace[0], "https://chat.google.com/app/home");
   assert.equal(calls.close, 0);
   assert.match(status.textContent, /Opening a clean Google Chat tab/i);
-  assert.equal(calls.workerMessages[0].releaseVersion, "0.3.6");
+  assert.equal(calls.workerMessages[0].releaseVersion, "0.3.7");
   assert.equal(calls.workerMessages[0].platform, "googleChat");
-  assert.equal(calls.workers[0].url, "./chatbut-bridge-worker.js?v=0.3.6");
-  assert.equal(calls.workers[0].options.name, "chatbut-config-bridge-v0.3.6");
+  assert.equal(calls.workers[0].url, "./chatbut-bridge-worker.js?v=0.3.7");
+  assert.equal(calls.workers[0].options.name, "chatbut-config-bridge-v0.3.7");
 });
 
 test("Teams handoff returns the helper tab to the work or school v2 client", () => {

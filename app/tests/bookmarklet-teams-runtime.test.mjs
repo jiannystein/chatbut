@@ -85,7 +85,7 @@ test("Teams widget renders without an innerHTML sink under Trusted Types", () =>
     assert.equal(root.querySelector('[data-role="status"]').getAttribute("role"), "status");
     assert.ok(root.querySelector(".cb-metrics"));
     assert.match(root.textContent, /Only new eligible messages · session safety limit 20/i);
-    assert.match(root.textContent, /Installed bookmark v0\.3\.6/i);
+    assert.match(root.textContent, /Installed bookmark v0\.3\.7/i);
     assert.ok(root.querySelector('[data-role="presence"]'));
     assert.ok(root.querySelector('[data-role="minimize"]'));
     assert.equal(openedWindows.length, 1);
