@@ -109,7 +109,7 @@ Chatbut sends the original saved response.
 3. Review the schedule, people, reply vaults, and safety settings. The default
    window is Monday–Friday, 06:00–08:00 in the browser's timezone.
 4. Select **Google** or **Teams**, then drag the displayed
-   **💬 Google v0.3.1** or **💬 Teams v0.3.1** button into
+   **💬 Google v0.3.2** or **💬 Teams v0.3.2** button into
    Chrome's bookmarks bar. The bookmarklets are independent; install both if
    you use both platforms.
 5. Select **Open Google Chat** or **Open Teams**. Teams support is limited to
@@ -234,10 +234,10 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 
 ## Verification
 
-The current release passed 64 runtime, adapter, configuration, targeting,
+The v0.3.2 release passed 64 runtime, adapter, configuration, targeting,
 provider, and bridge tests plus 4 hosting/package tests on 2026-08-01. The
 encoded Google Chat bookmarklet is 31,526 bytes and the Teams bookmarklet is
-32,698 bytes, each against an independently enforced 32,768-byte limit.
+32,627 bytes, each against an independently enforced 32,768-byte limit.
 
 Earlier coordinated desktop-Chrome acceptance confirmed Google Chat first
 replies in independent
@@ -255,9 +255,18 @@ cover Separate and Combined navigation, meeting exclusion, groups, channels,
 mentions, replies, unread quarantine, drafts, requests, and the two-tab bridge.
 The v0.3.1 hotfix additionally passed a real group-chat activation with both
 the account and group-profile controls present. The enhanced widget loaded,
-reached Enabled, and stopped cleanly with 0 replies, 0 chats, and 0 pending.
-Automatic self-chat testing, incoming auto-reply, Combined view, opted-in
-channel, and request acceptance still require live acceptance.
+reached Enabled, and stopped cleanly. A later self-chat acceptance exposed a
+live Teams editor rerender: the test message queued, then cleared without a
+reply, and the waiting button lacked Google Chat's countdown. v0.3.2 keeps the
+item pending through the send attempt, writes through Teams' live CKEditor
+model, reacquires the live editor and send control, and shows
+`Starts in HH:MM:SS`. Its deterministic fixture now completes the
+first reply, follow-up reply, and two-response session cap. This v0.3.2 send
+path also passed a controlled work-profile self-chat send: the reply rendered
+as the signed-in account, the widget reached 1 reply, 1 chat, 0 pending, and
+the session stopped cleanly. The fully automatic first/follow-up user sequence,
+ordinary incoming auto-reply, Combined view, opted-in channel, and request
+acceptance still require live acceptance.
 
 ## Teams support status
 
