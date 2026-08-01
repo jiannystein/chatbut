@@ -85,7 +85,7 @@ test("Teams widget renders without an innerHTML sink under Trusted Types", () =>
     assert.equal(root.querySelector('[data-role="status"]').getAttribute("role"), "status");
     assert.ok(root.querySelector(".cb-metrics"));
     assert.match(root.textContent, /Only new eligible messages · session safety limit 20/i);
-    assert.match(root.textContent, /Installed bookmark v0\.3\.4/i);
+    assert.match(root.textContent, /Installed bookmark v0\.3\.5/i);
     assert.ok(root.querySelector('[data-role="presence"]'));
     assert.ok(root.querySelector('[data-role="minimize"]'));
     assert.equal(openedWindows.length, 1);
@@ -171,7 +171,7 @@ test("Teams work or school v2 uses the two-tab handoff and excludes meetings fro
 test("Teams ad-hoc presence applies on enable, locks, and resets on stop", async () => {
   const html = `<!doctype html><html><head></head><body>
     <button data-tid="me-control-avatar-trigger">Profile</button>
-    <div data-tid="me-control-menu-dialog">
+    <div data-tid="me-control-menu-dialog" hidden>
       <span data-tid="me-control-displayname">Operator</span>
       <div role="menuitem" data-tid="set-presence-status-menu-item" aria-label="Available, change status">Available</div>
       <div role="menuitemradio" data-tid="me_control_presence_availability_available">Available</div>
@@ -183,8 +183,21 @@ test("Teams ad-hoc presence applies on enable, locks, and resets on stop", async
   const port = { onmessage: null, start() {}, postMessage() {} };
   try {
     const status = dom.window.document.querySelector('[data-tid="set-presence-status-menu-item"]');
+    const profile = dom.window.document.querySelector('[data-tid="me-control-avatar-trigger"]');
+    const menu = dom.window.document.querySelector('[data-tid="me-control-menu-dialog"]');
+    for (const element of [menu, ...menu.querySelectorAll("*")]) {
+      Object.defineProperty(element, "offsetParent", {
+        configurable: true,
+        get() { return menu.hidden ? null : menu; },
+      });
+    }
+    profile.addEventListener("click", () => { menu.hidden = !menu.hidden; });
     dom.window.document.querySelector('[data-tid="me_control_presence_availability_busy"]').addEventListener("click", () => {
-      setTimeout(() => status.setAttribute("aria-label", "Busy, change status"), 500);
+      setTimeout(() => {
+        const replacement = status.cloneNode(true);
+        replacement.setAttribute("aria-label", "Busy, change status");
+        status.replaceWith(replacement);
+      }, 500);
     });
     dom.window.eval(runtime);
     const root = dom.window.document.getElementById("chatbut-runtime");
@@ -201,9 +214,10 @@ test("Teams ad-hoc presence applies on enable, locks, and resets on stop", async
     select.value = "busy";
     select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     root.querySelector('[data-role="enable"]').click();
-    await new Promise((resolve) => setTimeout(resolve, 900));
+    await new Promise((resolve) => setTimeout(resolve, 1_500));
     assert.equal(root.chatbutRuntime.enabled, true);
-    assert.equal(status.getAttribute("aria-label"), "Busy, change status");
+    assert.equal(dom.window.document.querySelector('[data-tid="set-presence-status-menu-item"]').getAttribute("aria-label"), "Busy, change status");
+    assert.equal(menu.hidden, true);
     assert.equal(select.disabled, true);
     root.querySelector('[data-role="minimize"]').click();
     assert.equal(root.querySelector("main").hidden, true);
@@ -212,6 +226,45 @@ test("Teams ad-hoc presence applies on enable, locks, and resets on stop", async
     root.querySelector('[data-role="stop"]').click();
     assert.equal(select.disabled, false);
     assert.equal(select.value, "available");
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Teams verifies Away when Out of office masks the availability label", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <button data-tid="me-control-avatar-trigger">Profile</button>
+    <div data-tid="me-control-menu-dialog">
+      <span data-tid="me-control-displayname">Operator</span>
+      <div role="menuitem" data-tid="set-presence-status-menu-item" aria-label="Available, Out of office, change status">Available, Out of office</div>
+      <div role="menuitemradio" data-tid="me_control_presence_availability_appear_away">Away</div>
+    </div>
+  </body></html>`;
+  const { dom, openedWindows, bridgeWindow } = makeDom("https://teams.microsoft.com/v2/", { html });
+  const port = { onmessage: null, start() {}, postMessage() {} };
+  try {
+    const status = dom.window.document.querySelector('[data-tid="set-presence-status-menu-item"]');
+    dom.window.document.querySelector('[data-tid="me_control_presence_availability_appear_away"]').addEventListener("click", () => {
+      setTimeout(() => {
+        const replacement = status.cloneNode(true);
+        replacement.setAttribute("aria-label", "Out of office, change status");
+        status.replaceWith(replacement);
+      }, 500);
+    });
+    dom.window.eval(runtime);
+    const root = dom.window.document.getElementById("chatbut-runtime");
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce }, origin: "https://jiannystein.github.io", source: bridgeWindow, ports: [port],
+    }));
+    const config = teamsRuntimeConfig();
+    config.presence = "away";
+    config.schedule = { ...config.schedule, days: [0, 1, 2, 3, 4, 5, 6], windows: [{ start: "00:00", end: "00:00" }] };
+    port.onmessage({ data: { type: "chatbut:config", nonce, config, widgetCss: "#chatbut-runtime{}" } });
+    root.querySelector('[data-role="enable"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    assert.equal(root.chatbutRuntime.enabled, true);
+    assert.equal(dom.window.document.querySelector('[data-tid="set-presence-status-menu-item"]').getAttribute("aria-label"), "Out of office, change status");
   } finally {
     dom.window.close();
   }

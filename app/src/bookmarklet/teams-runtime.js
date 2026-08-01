@@ -33,7 +33,7 @@ const CHANNEL_NAME = "chatbut-single-instance";
 const PAIRING_TOKEN = "__CHATBUT_PAIRING_TOKEN__";
 const BRIDGE_URL = "__CHATBUT_BRIDGE_URL__";
 const BRIDGE_ORIGIN = new URL(BRIDGE_URL).origin;
-const PRESENCE_ERROR = "Presence not verified.";
+const PRESENCE_ERROR = "Presence failed";
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function uniqueVisible(selector, root = document) {
@@ -42,7 +42,7 @@ function uniqueVisible(selector, root = document) {
 }
 
 async function waitUnique(selector) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 20; attempt++) {
     await sleep(100);
     const match = uniqueVisible(selector);
     if (match) return match;
@@ -371,7 +371,7 @@ class TeamsRuntime {
     enable.disabled = true;
     override.hidden = false;
     this.node("mode").textContent = "Waiting";
-    this.setStatus("Waiting for next window. Keep tab open.");
+    this.setStatus("Waiting for next window.");
     const update = () => {
       if (!this.waitingForSchedule || this.enabled) return;
       if (isRuntimeScheduleActive(this.config)) {
@@ -395,7 +395,7 @@ class TeamsRuntime {
       || control.getAttribute("aria-current") === "page"
     ) return true;
     control.click();
-    for (let attempt = 0; attempt < 15; attempt += 1) {
+    for (let attempt = 0; attempt < 15; attempt++) {
       await sleep(100);
       if (activeTeamsApp() === app || teamsConversationRows().some((item) => (
         app === "teams" ? item.kind === "channel" : item.kind !== "channel"
@@ -473,7 +473,7 @@ class TeamsRuntime {
     const matches = teamsConversationRows().filter((candidate) => candidate.id === item.id && !candidate.ambiguous && candidate.element);
     if (matches.length !== 1) return false;
     matches[0].element.click();
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt++) {
       await sleep(150);
       if (activeTeamsConversation()?.id === item.id) return true;
     }
@@ -496,24 +496,23 @@ class TeamsRuntime {
     const control = uniqueVisible('[data-tid="me-control-avatar-trigger"]');
     if (!control) return "";
     control.click();
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 20; attempt++) {
       await sleep(100);
       name = visibleTeamsSelfName();
       if (name) break;
     }
-    const dialog = uniqueVisible('[data-tid="me-control-menu-dialog"]');
-    if (dialog) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    control.click();
     return name;
   }
 
   async applyPresence() {
-    const select = this.node("presence");
-    const value = select.value;
+    const value = this.node("presence").value;
     if (value === "none") return;
     const profile = uniqueVisible('[data-tid="me-control-avatar-trigger"]');
     if (!profile) throw new Error(PRESENCE_ERROR);
     profile.click();
-    const change = await waitUnique('[data-tid="set-presence-status-menu-item"]');
+    const statusSelector = "[data-tid*=presence-status]";
+    let change = await waitUnique(statusSelector);
     if (!change) throw new Error(PRESENCE_ERROR);
     change.click();
     const suffix = value === "away" ? "appear_away" : value;
@@ -521,11 +520,12 @@ class TeamsRuntime {
     if (!item) throw new Error(PRESENCE_ERROR);
     item.click();
     let verified = false;
-    for (let attempt = 0; attempt < 20 && !verified; attempt += 1) {
+    for (let attempt = 0; attempt < 20 && !verified; attempt++) {
       await sleep(150);
-      verified = (change.getAttribute("aria-label") || teamsText(change)).toLowerCase().includes(value);
+      change = uniqueVisible(statusSelector);
+      verified = change && (change.getAttribute("aria-label") || teamsText(change)).toLowerCase().match(value === "away" ? /away|out/ : value);
     }
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    profile.click();
     if (!verified) throw new Error(PRESENCE_ERROR);
   }
 
@@ -905,7 +905,7 @@ class TeamsRuntime {
       );
       ready.send.click();
       let sentId = "";
-      for (let attempt = 0; attempt < 30; attempt += 1) {
+      for (let attempt = 0; attempt < 30; attempt++) {
         await sleep(150);
         const candidate = [...document.querySelectorAll('[data-tid="chat-pane-message"][data-mid]')]
           .filter(teamsVisible)
@@ -938,7 +938,7 @@ class TeamsRuntime {
       [vaultName]: [...templateHistory, template].slice(-this.config.responses[vaultName].length),
     };
     this.states.set(item.id, state);
-    this.sessionCount += 1;
+    this.sessionCount++;
     this.sessionChats.add(item.id);
     this.updateMetrics();
     this.setStatus("Reply sent. Watching.", "ok");

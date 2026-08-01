@@ -114,7 +114,7 @@ Chatbut sends the original saved response.
 3. Review the schedule, people, reply vaults, and safety settings. The default
    window is Monday–Friday, 06:00–08:00 in the browser's timezone.
 4. Select **Google** or **Teams**, then drag the displayed
-   **💬 Google v0.3.4** or **💬 Teams v0.3.4** button into
+   **💬 Google v0.3.5** or **💬 Teams v0.3.5** button into
    Chrome's bookmarks bar. The bookmarklets are independent; install both if
    you use both platforms.
 5. Select **Open Google Chat** or **Open Teams**. Teams support is limited to
@@ -246,10 +246,10 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 
 ## Verification
 
-The v0.3.4 release passed 70 runtime, adapter, configuration, targeting,
+The v0.3.5 release passed 71 runtime, adapter, configuration, targeting,
 provider, and bridge tests plus 4 hosting/package tests on 2026-08-01. The
 encoded Google Chat bookmarklet is 32,663 bytes and the Teams bookmarklet is
-32,767 bytes, each against an independently enforced 32,768-byte limit.
+32,538 bytes, each against an independently enforced 32,768-byte limit.
 
 Earlier coordinated desktop-Chrome acceptance confirmed Google Chat first
 replies in independent
@@ -278,10 +278,12 @@ sequence has now passed live: each manual self-message produced one reply, the
 pending counter returned to zero, and no third reply was allowed in the
 enabled session. v0.3.3 adds shared footer copy, non-stopping minimize controls,
 and default-off presence selection with enable-time application, verification,
-and lockout. v0.3.4 waits for Teams' delayed native status update before
-deciding whether presence was verified. Ordinary incoming auto-reply, Combined
-view, opted-in channel, request acceptance, and live presence mutation still
-require acceptance.
+and lockout. v0.3.5 closes the identity menu through Teams' native profile
+toggle, waits for delayed status updates, reacquires replaced status controls,
+and recognizes Away when Out of office masks its label. The enable/stop cycle
+passed live against Available, Busy, and Away status behavior. Ordinary incoming
+auto-reply, Combined view, opted-in channel, and request acceptance still require
+acceptance.
 
 ## Teams support status
 
