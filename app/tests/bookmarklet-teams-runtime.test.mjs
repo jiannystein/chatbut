@@ -85,7 +85,7 @@ test("Teams widget renders without an innerHTML sink under Trusted Types", () =>
     assert.equal(root.querySelector('[data-role="status"]').getAttribute("role"), "status");
     assert.ok(root.querySelector(".cb-metrics"));
     assert.match(root.textContent, /Only new eligible messages · session safety limit 20/i);
-    assert.match(root.textContent, /Installed bookmark v0\.3\.3/i);
+    assert.match(root.textContent, /Installed bookmark v0\.3\.4/i);
     assert.ok(root.querySelector('[data-role="presence"]'));
     assert.ok(root.querySelector('[data-role="minimize"]'));
     assert.equal(openedWindows.length, 1);
@@ -184,7 +184,7 @@ test("Teams ad-hoc presence applies on enable, locks, and resets on stop", async
   try {
     const status = dom.window.document.querySelector('[data-tid="set-presence-status-menu-item"]');
     dom.window.document.querySelector('[data-tid="me_control_presence_availability_busy"]').addEventListener("click", () => {
-      status.setAttribute("aria-label", "Busy, change status");
+      setTimeout(() => status.setAttribute("aria-label", "Busy, change status"), 500);
     });
     dom.window.eval(runtime);
     const root = dom.window.document.getElementById("chatbut-runtime");
@@ -201,7 +201,7 @@ test("Teams ad-hoc presence applies on enable, locks, and resets on stop", async
     select.value = "busy";
     select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
     root.querySelector('[data-role="enable"]').click();
-    await new Promise((resolve) => setTimeout(resolve, 450));
+    await new Promise((resolve) => setTimeout(resolve, 900));
     assert.equal(root.chatbutRuntime.enabled, true);
     assert.equal(status.getAttribute("aria-label"), "Busy, change status");
     assert.equal(select.disabled, true);
