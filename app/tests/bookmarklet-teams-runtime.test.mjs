@@ -158,15 +158,17 @@ test("Teams work or school v2 uses the two-tab handoff and excludes meetings fro
     assert.match(dom.window.document.querySelector("style").textContent, /border-radius:10px/);
     assert.match(dom.window.document.querySelector("style").textContent, /button:focus-visible/);
     assert.equal(dom.window.document.title, "Chatbut automation · Teams");
+    assert.match(dom.window.document.querySelector('[data-role="enable"]').textContent, /^Starts in \d{2,}:\d{2}:\d{2}$/);
   } finally {
     dom.window.close();
   }
 });
 
-test("trusted manual typing in Teams self chat queues one automatic test response", async () => {
+test("Teams self chat sends two verified responses and caps the enabled session", async () => {
   const html = `<!doctype html><html><head></head><body>
     <button data-tid="me-control-avatar-trigger" aria-label="Your profile">Profile</button>
     <button aria-label="Change the group profile picture">Group picture</button>
+    <button data-tid="app-bar-chat" aria-label="Chat">Chat</button>
     <div role="treeitem" aria-level="2" aria-selected="true" tabindex="0" data-item-type="chat" data-fui-tree-item-value="self|chat|48:notes" aria-label="Self chat"><span>Self chat</span></div>
     <div data-tid="chat-pane-item"><span data-tid="message-author-name">Operator (You)</span><div data-tid="chat-pane-message" data-mid="baseline"><span data-message-content>Earlier note</span></div></div>
     <div role="textbox" contenteditable="true" data-tid="ckeditor"></div>
@@ -174,8 +176,32 @@ test("trusted manual typing in Teams self chat queues one automatic test respons
   </body></html>`;
   const { dom, openedWindows, bridgeWindow } = makeDom("https://teams.microsoft.com/v2/", { html });
   const sent = [];
-  const port = { onmessage: null, start() {}, postMessage(message) { sent.push(message); } };
+  const port = {
+    onmessage: null,
+    start() {},
+    postMessage(message) {
+      sent.push(message);
+      if (message.type === "chatbut:request-send-lease") {
+        queueMicrotask(() => port.onmessage({
+          data: {
+            type: "chatbut:send-lease",
+            nonce: message.nonce,
+            requestId: message.requestId,
+            granted: true,
+            retryAfterMs: 0,
+          },
+        }));
+      }
+    },
+  };
   const composer = dom.window.document.querySelector('[data-tid="ckeditor"]');
+  const chatControl = dom.window.document.querySelector('[data-tid="app-bar-chat"]');
+  let selfRow = dom.window.document.querySelector('[data-fui-tree-item-value="self|chat|48:notes"]');
+  chatControl.addEventListener("click", () => {
+    const replacement = selfRow.cloneNode(true);
+    selfRow.replaceWith(replacement);
+    selfRow = replacement;
+  });
   const profile = dom.window.document.querySelector('[data-tid="me-control-avatar-trigger"]');
   profile.addEventListener("click", () => {
     dom.window.document.body.insertAdjacentHTML("beforeend", `
@@ -193,9 +219,75 @@ test("trusted manual typing in Teams self chat queues one automatic test respons
   });
   const originalAddEventListener = composer.addEventListener.bind(composer);
   let beforeInput = null;
+  let automatedResponseCount = 0;
   composer.addEventListener = (type, handler, options) => {
     if (type === "beforeinput") beforeInput = handler;
     return originalAddEventListener(type, handler, options);
+  };
+  composer.addEventListener("input", () => {
+    if (!composer.textContent) return;
+    const replacementComposer = composer.cloneNode(false);
+    const paragraph = dom.window.document.createElement("p");
+    paragraph.textContent = composer.textContent;
+    replacementComposer.append(paragraph);
+    composer.replaceWith(replacementComposer);
+    const currentSend = dom.window.document.querySelector('[data-tid="sendMessageCommands-send"]');
+    const replacementSend = currentSend.cloneNode(true);
+    currentSend.replaceWith(replacementSend);
+    replacementSend.addEventListener("click", () => {
+      const sentText = replacementComposer.textContent;
+      replacementComposer.textContent = "";
+      const item = dom.window.document.createElement("div");
+      item.dataset.tid = "chat-pane-item";
+      const author = dom.window.document.createElement("span");
+      author.dataset.tid = "message-author-name";
+      author.textContent = "Operator (You)";
+      const message = dom.window.document.createElement("div");
+      message.dataset.tid = "chat-pane-message";
+      automatedResponseCount += 1;
+      message.dataset.mid = `automated-response-${automatedResponseCount}`;
+      const content = dom.window.document.createElement("span");
+      content.dataset.messageContent = "";
+      content.textContent = sentText;
+      message.append(content);
+      item.append(author, message);
+      dom.window.document.body.append(item);
+    });
+  });
+  composer.ckeditorInstance = {
+    setData(value) {
+      composer.textContent = value;
+    },
+    model: {
+      change(callback) {
+        callback({ createText: (value) => value });
+      },
+      insertContent(value) {
+        composer.textContent = value;
+        composer.dispatchEvent(new dom.window.InputEvent("input", {
+          bubbles: true,
+          inputType: "insertText",
+          data: value,
+        }));
+      },
+    },
+  };
+  dom.window.document.execCommand = () => true;
+  const appendSelfMessage = (id, text) => {
+    const item = dom.window.document.createElement("div");
+    item.dataset.tid = "chat-pane-item";
+    const author = dom.window.document.createElement("span");
+    author.dataset.tid = "message-author-name";
+    author.textContent = "Operator (You)";
+    const message = dom.window.document.createElement("div");
+    message.dataset.tid = "chat-pane-message";
+    message.dataset.mid = id;
+    const content = dom.window.document.createElement("span");
+    content.dataset.messageContent = "";
+    content.textContent = text;
+    message.append(content);
+    item.append(author, message);
+    dom.window.document.body.append(item);
   };
   try {
     dom.window.eval(runtime);
@@ -207,11 +299,18 @@ test("trusted manual typing in Teams self chat queues one automatic test respons
       source: bridgeWindow,
       ports: [port],
     }));
+    const config = teamsRuntimeConfig();
+    config.delays.minimumSeconds = 1;
+    config.delays.maximumSeconds = 1;
+    config.delays.followUpMinutes = 0;
+    config.responses.vault1 = ["Self reply"];
+    config.responses.vault2 = ["Second self reply"];
+    config.debug.enabled = true;
     port.onmessage({
       data: {
         type: "chatbut:config",
         nonce,
-        config: teamsRuntimeConfig(),
+        config,
         widgetCss: "#chatbut-runtime{border-radius:10px}",
         fileName: "Browser-local configuration",
       },
@@ -222,20 +321,71 @@ test("trusted manual typing in Teams self chat queues one automatic test respons
       await new Promise((resolve) => setTimeout(resolve, 25));
     }
     assert.equal(root.querySelector('[data-role="mode"]').textContent, "Enabled");
+    await new Promise((resolve) => setTimeout(resolve, 250));
     assert.equal(typeof beforeInput, "function");
-    beforeInput({ isTrusted: true });
-    dom.window.document.body.insertAdjacentHTML("beforeend", '<div data-tid="chat-pane-item"><span data-tid="message-author-name">Operator (You)</span><div data-tid="chat-pane-message" data-mid="manual-trigger"><span data-message-content>Test this response</span></div></div>');
     const runtimeInstance = root.chatbutRuntime;
+    const falseBooleanKeys = Object.entries(runtimeInstance)
+      .filter(([, value]) => value === false)
+      .map(([key]) => key);
+    beforeInput({ isTrusted: true });
+    const armedKeys = falseBooleanKeys.filter((key) => runtimeInstance[key] === true);
+    assert.equal(armedKeys.length, 1);
+    appendSelfMessage("manual-trigger-1", "Test this response");
     const prototype = Object.getPrototypeOf(runtimeInstance);
     const tickName = Object.getOwnPropertyNames(prototype).find((name) => (
       name !== "constructor" && typeof prototype[name] === "function" && String(prototype[name]).includes("tick_error")
     ));
+    const collectName = Object.getOwnPropertyNames(prototype).find((name) => (
+      name !== "constructor" && typeof prototype[name] === "function" && String(prototype[name]).includes('aria-expanded="false"')
+    ));
     assert.ok(tickName);
+    assert.ok(collectName);
+    const collected = await runtimeInstance[collectName]();
+    const collectedSelf = collected.find((item) => item.id === "48:notes");
+    assert.ok(collectedSelf, JSON.stringify(collected));
+    assert.ok(
+      Object.values(collectedSelf).some((value) => value instanceof dom.window.HTMLElement),
+      JSON.stringify(collectedSelf),
+    );
     await runtimeInstance[tickName]();
-    assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "1");
+    assert.equal(
+      root.querySelector('[data-role="metric-pending"]').textContent,
+      "1",
+      JSON.stringify(sent.filter((message) => message.type === "chatbut:debug")),
+    );
     await runtimeInstance[tickName]();
-    assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "1");
+    assert.equal(
+      root.querySelector('[data-role="metric-pending"]').textContent,
+      "1",
+      JSON.stringify(sent.filter((message) => message.type === "chatbut:debug")),
+    );
     assert.equal(sent.some((message) => message.type === "chatbut:send-lease"), false);
+    await new Promise((resolve) => setTimeout(resolve, 1_250));
+    assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "1");
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "0");
+    assert.equal(root.querySelector('[data-role="metric-replies"]').textContent, "1");
+    assert.equal(
+      dom.window.document.querySelector('[data-mid="automated-response-1"] [data-message-content]').textContent,
+      "Self reply",
+    );
+    beforeInput({ isTrusted: true });
+    appendSelfMessage("manual-trigger-2", "Test the follow-up response");
+    await runtimeInstance[tickName]();
+    assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "1");
+    await new Promise((resolve) => setTimeout(resolve, 2_250));
+    assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "0");
+    assert.equal(root.querySelector('[data-role="metric-replies"]').textContent, "2");
+    assert.equal(
+      dom.window.document.querySelector('[data-mid="automated-response-2"] [data-message-content]').textContent,
+      "Second self reply",
+    );
+    beforeInput({ isTrusted: true });
+    appendSelfMessage("manual-trigger-3", "Confirm the two-response cap");
+    await runtimeInstance[tickName]();
+    assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "0");
+    assert.equal(root.querySelector('[data-role="metric-replies"]').textContent, "2");
+    assert.equal(automatedResponseCount, 2);
   } finally {
     dom.window.close();
   }
