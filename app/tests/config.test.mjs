@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
   DEFAULT_CONFIG,
@@ -17,6 +18,8 @@ import {
   validateRuntimeConfig,
 } from "../src/bookmarklet/runtime-config.js";
 import { isNewerRelease, RELEASE_VERSION } from "../src/release.js";
+
+const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
 test("normalization constrains values and migrates a legacy DeepSeek config", () => {
   const normalized = normalizeConfig({
@@ -293,7 +296,7 @@ test("the runtime finds the next window and formats total-hour countdowns", () =
 });
 
 test("release comparison is semantic and runtime LLM validation accepts redacted keys", () => {
-  assert.equal(RELEASE_VERSION, "0.3.7");
+  assert.equal(RELEASE_VERSION, "0.3.8");
   assert.equal(isNewerRelease("0.4.0", RELEASE_VERSION), true);
   assert.equal(isNewerRelease("0.2.9", RELEASE_VERSION), false);
   assert.equal(isNewerRelease("not-a-version", RELEASE_VERSION), false);
@@ -314,4 +317,10 @@ test("release comparison is semantic and runtime LLM validation accepts redacted
     },
   };
   assert.equal(validateRuntimeConfig(runtimeConfig).valid, true);
+});
+
+test("bookmarklet downloads are versioned and bypass stale browser caches", () => {
+  assert.match(appSource, /chatbut-google-bookmarklet\.txt\?v=\$\{RELEASE_VERSION\}/);
+  assert.match(appSource, /chatbut-teams-bookmarklet\.txt\?v=\$\{RELEASE_VERSION\}/);
+  assert.equal(appSource.match(/cache: "no-store"/g)?.length, 2);
 });

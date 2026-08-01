@@ -1515,8 +1515,8 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      fetch("./chatbut-google-bookmarklet.txt"),
-      fetch("./chatbut-teams-bookmarklet.txt"),
+      fetch(`./chatbut-google-bookmarklet.txt?v=${RELEASE_VERSION}`, { cache: "no-store" }),
+      fetch(`./chatbut-teams-bookmarklet.txt?v=${RELEASE_VERSION}`, { cache: "no-store" }),
     ])
       .then(async (responses) => {
         if (responses.some((response) => !response.ok)) throw new Error("Bookmarklet artifact is unavailable.");
