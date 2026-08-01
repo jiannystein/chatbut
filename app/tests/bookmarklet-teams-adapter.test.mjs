@@ -12,6 +12,8 @@ import {
   teamsMentionTargetsSelf,
   teamsReplyTargetsSelf,
   teamsUnreadTransition,
+  teamsVisible,
+  visibleTeamsSelfName,
 } from "../src/bookmarklet/teams-adapter.js";
 
 const IDS = {
@@ -35,6 +37,22 @@ function makeDom(html) {
 function row({ id, type = "chat", level = "2", label = "Conversation", extra = "" }) {
   return `<div role="treeitem" aria-level="${level}" data-item-type="${type}" data-fui-tree-item-value="${id}" aria-label="${label}" ${extra}><span>${label}</span></div>`;
 }
+
+test("fixed-position Teams profile content remains visible without an offset parent", () => {
+  const dom = makeDom('<span data-tid="me-control-displayname">Operator</span>');
+  const display = dom.window.document.querySelector('[data-tid="me-control-displayname"]');
+  Object.defineProperty(display, "offsetParent", { configurable: true, get: () => null });
+  Object.defineProperty(display, "getClientRects", {
+    configurable: true,
+    value: () => [{ width: 80, height: 20 }],
+  });
+  assert.equal(teamsVisible(display), true);
+  assert.equal(visibleTeamsSelfName(dom.window.document), "Operator");
+  display.style.display = "none";
+  assert.equal(teamsVisible(display), false);
+  assert.equal(visibleTeamsSelfName(dom.window.document), "");
+  dom.window.close();
+});
 
 test("Separate and Combined navigation fixtures classify only supported non-meeting rows", () => {
   for (const layout of ["separate", "combined"]) {

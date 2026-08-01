@@ -109,7 +109,7 @@ Chatbut sends the original saved response.
 3. Review the schedule, people, reply vaults, and safety settings. The default
    window is Monday–Friday, 06:00–08:00 in the browser's timezone.
 4. Select **Google** or **Teams**, then drag the displayed
-   **💬 Google Chat v0.3.0** or **💬 Teams v0.3.0** button into
+   **💬 Google v0.3.1** or **💬 Teams v0.3.1** button into
    Chrome's bookmarks bar. The bookmarklets are independent; install both if
    you use both platforms.
 5. Select **Open Google Chat** or **Open Teams**. Teams support is limited to
@@ -234,10 +234,10 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 
 ## Verification
 
-The current release passed 61 runtime, adapter, configuration, targeting,
+The current release passed 64 runtime, adapter, configuration, targeting,
 provider, and bridge tests plus 4 hosting/package tests on 2026-08-01. The
-encoded Google Chat bookmarklet is 31,514 bytes and the Teams bookmarklet is
-32,610 bytes, each against an independently enforced 32,768-byte limit.
+encoded Google Chat bookmarklet is 31,526 bytes and the Teams bookmarklet is
+32,698 bytes, each against an independently enforced 32,768-byte limit.
 
 Earlier coordinated desktop-Chrome acceptance confirmed Google Chat first
 replies in independent
@@ -253,6 +253,9 @@ profile identity, an empty composer, send readiness, and one labelled self-DM
 message whose rendered author matched the resolved profile. Automated fixtures
 cover Separate and Combined navigation, meeting exclusion, groups, channels,
 mentions, replies, unread quarantine, drafts, requests, and the two-tab bridge.
+The v0.3.1 hotfix additionally passed a real group-chat activation with both
+the account and group-profile controls present. The enhanced widget loaded,
+reached Enabled, and stopped cleanly with 0 replies, 0 chats, and 0 pending.
 Automatic self-chat testing, incoming auto-reply, Combined view, opted-in
 channel, and request acceptance still require live acceptance.
 

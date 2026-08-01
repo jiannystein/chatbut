@@ -130,7 +130,11 @@ class TeamsRuntime {
     }
     if (event.data?.type !== "chatbut:config") return;
     clearTimeout(this.connectionTimeout);
-    if (event.data.widgetCss) this.style.textContent = event.data.widgetCss;
+    if (!event.data.widgetCss) {
+      this.setStatus("Replace this bookmark from Chatbut.");
+      return;
+    }
+    this.style.textContent = event.data.widgetCss;
     this.config = event.data.config;
     this.root.querySelector('[data-role="connect"]').hidden = true;
     this.setStatus(`Connected to ${String(event.data.fileName || "local configuration")}.`, "ok");
@@ -256,7 +260,7 @@ class TeamsRuntime {
     enable.disabled = true;
     appendElement(actions, "button", "Enable now", "override").hidden = true;
     appendElement(actions, "button", "Stop", "stop", "cb-stop").hidden = true;
-    appendElement(main, "p", "Only new messages · meetings ignored · self-test limit 2 · session limit 20", "", "cb-mini");
+    appendElement(main, "p", "New messages · no meetings · self-test 2 · session 20", "", "cb-mini");
     this.root.querySelector(".cb-close").addEventListener("click", () => {
       if (!this.enabled) this.cancelScheduleWait();
       this.root.hidden = true;
@@ -306,7 +310,7 @@ class TeamsRuntime {
       enable.textContent = "Enable";
       override.hidden = true;
       this.root.querySelector('[data-role="mode"]').textContent = "Disabled";
-      this.setStatus("Ready. Enable when this dedicated Teams tab can stay open.", "ok");
+      this.setStatus("Ready. Keep this Teams tab open.", "ok");
       return;
     }
     this.waitingForSchedule = true;
@@ -430,11 +434,10 @@ class TeamsRuntime {
   async resolveSelfName() {
     let name = visibleTeamsSelfName();
     if (name) return name;
-    const controls = [...document.querySelectorAll(
-      '[data-tid="me-control-avatar-trigger"], button[aria-label*="account manager" i], button[aria-label*="profile" i]',
-    )].filter(teamsVisible);
-    if (controls.length !== 1) return "";
-    controls[0].click();
+    const control = uniqueVisible('[data-tid="me-control-avatar-trigger"]')
+      || uniqueVisible('button[aria-label*="account manager" i], button[aria-label*="profile" i]');
+    if (!control) return "";
+    control.click();
     for (let attempt = 0; attempt < 20; attempt += 1) {
       await sleep(100);
       name = visibleTeamsSelfName();
@@ -507,7 +510,7 @@ class TeamsRuntime {
     this.activating = true;
     try {
       this.selfName = await this.resolveSelfName();
-      if (!this.selfName) throw new Error("Your Teams profile identity could not be verified. Open the profile menu, close it, then retry.");
+      if (!this.selfName) throw new Error("Open your Teams profile menu, close it, then retry.");
       if (this.config.llm.enabled) {
         this.setStatus("Checking the active LLM connection…");
         const result = await this.requestBridge("chatbut:validate-active", {}, ["chatbut:active-valid"]);
@@ -547,8 +550,8 @@ class TeamsRuntime {
     this.channel?.postMessage("enabled");
     this.setStatus(
       scheduleOverride
-        ? "Schedule overridden. Watching new eligible Teams messages; meeting chats stay ignored."
-        : "Watching new eligible Teams messages; meeting chats stay ignored.",
+        ? "Schedule overridden. Watching new messages; meetings ignored."
+        : "Watching new messages; meetings ignored.",
       "ok",
     );
     this.writeDebug("enabled", { conversation: this.originalContext?.id, quarantined: this.quarantined.size });

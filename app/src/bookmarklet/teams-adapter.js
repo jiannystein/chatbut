@@ -4,7 +4,11 @@ const MESSAGE_SELECTOR = '[data-tid="chat-pane-message"][data-mid]';
 const CONVERSATION_ID_PATTERN = /(?:19:[A-Za-z0-9._~!$&'()*+,;=:@%-]+@(?:unq\.gbl\.spaces|thread\.v2|thread\.skype)|48:notes)/gi;
 
 export function teamsVisible(element) {
-  return Boolean(element && element.nodeType === 1 && element.offsetParent !== null);
+  if (!element || element.nodeType !== 1) return false;
+  if (element.offsetParent !== null) return true;
+  if (typeof element.getClientRects !== "function" || !element.getClientRects().length) return false;
+  const style = element.ownerDocument?.defaultView?.getComputedStyle?.(element);
+  return Boolean(style && style.display !== "none" && style.visibility !== "hidden");
 }
 
 export function teamsText(element) {
