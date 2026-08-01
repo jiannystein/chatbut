@@ -265,7 +265,7 @@ test("the runtime finds the next window and formats total-hour countdowns", () =
 });
 
 test("release comparison is semantic and runtime LLM validation accepts redacted keys", () => {
-  assert.equal(RELEASE_VERSION, "0.3.1");
+  assert.equal(RELEASE_VERSION, "0.3.2");
   assert.equal(isNewerRelease("0.4.0", RELEASE_VERSION), true);
   assert.equal(isNewerRelease("0.2.9", RELEASE_VERSION), false);
   assert.equal(isNewerRelease("not-a-version", RELEASE_VERSION), false);
