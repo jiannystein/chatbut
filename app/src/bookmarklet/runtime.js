@@ -501,7 +501,7 @@ class ChatbutRuntime {
     const select = this.root.querySelector('[data-role="presence"]');
     const value = select.value;
     if (value === "none") return;
-    const control = uniqueVisible('button[aria-label^="Status:"]');
+    const control = uniqueVisible('[aria-label^="Status:"]');
     if (!control) throw new Error("Google Chat presence control was not found.");
     control.click();
     const selector = value === "active" ? '[role="menuitem"][jsname="pms6R"]'
