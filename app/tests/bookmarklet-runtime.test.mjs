@@ -103,6 +103,17 @@ test("bookmarklet explains the two-tab handoff and respects cancellation", () =>
   }
 });
 
+test("Google widget shows its installed version before the bridge connects", () => {
+  const { dom } = makeDom("https://chat.google.com/app/home");
+  try {
+    dom.window.eval(runtime);
+    const root = dom.window.document.getElementById("chatbut-runtime");
+    assert.match(root.textContent, /Installed bookmark v0\.3\.7/i);
+  } finally {
+    dom.window.close();
+  }
+});
+
 test("bookmarklet indexes direct, group-DM, and Space rows with safe labels", async () => {
   const html = `<!doctype html><html><head></head><body>
     <button aria-label="Google Account: Test User (test@example.com)"></button>
