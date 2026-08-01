@@ -22,6 +22,7 @@ import {
   List,
   LockKey,
   MagnifyingGlass,
+  Minus,
   Play,
   Plus,
   ShieldCheck,
@@ -44,7 +45,6 @@ import {
   formatDayRange,
   formatSchedule,
   isScheduleActive,
-  nextWindowLabel,
   normalizeConfig,
   validateConfig,
 } from "./config.js";
@@ -70,6 +70,20 @@ const PLATFORM_OPTIONS = [
   { id: "googleChat", label: "Google Chat", shortLabel: "Google", url: GOOGLE_CHAT_URL },
   { id: "teams", label: "Microsoft Teams", shortLabel: "Teams", url: TEAMS_URL },
 ];
+const PRESENCE_OPTIONS = {
+  googleChat: [
+    { value: "none", label: "No change" },
+    { value: "active", label: "Active" },
+    { value: "dnd", label: "Do not disturb" },
+    { value: "away", label: "Away" },
+  ],
+  teams: [
+    { value: "none", label: "No change" },
+    { value: "available", label: "Available" },
+    { value: "busy", label: "Busy" },
+    { value: "away", label: "Away" },
+  ],
+};
 const PROVIDERS = [
   { id: "deepseek", label: "DeepSeek", hint: "Default" },
   { id: "openai", label: "OpenAI", hint: "OpenAI API" },
@@ -454,8 +468,9 @@ function ScheduleTimeInput({ id, label, value, onCommit }) {
   );
 }
 
-function OverlayPreview({ nextWindow, scheduleLabel, withinSchedule, platform }) {
+function OverlayPreview({ platform, presence }) {
   const platformLabel = PLATFORM_OPTIONS.find((item) => item.id === platform)?.label ?? "Chat";
+  const presenceOptions = PRESENCE_OPTIONS[platform];
   return (
     <aside className="overlay-frame" aria-label={`${platformLabel} widget preview`}>
       <div className="overlay-frame__heading">
@@ -464,10 +479,20 @@ function OverlayPreview({ nextWindow, scheduleLabel, withinSchedule, platform })
       </div>
       <div className="overlay-panel" aria-disabled="true">
         <div className="overlay-panel__header">
-          <strong>Chatbut v{RELEASE_VERSION}</strong>
-          <span>Disabled</span>
+          <strong>Chatbut</strong>
+          <span className="overlay-panel__mode">Disabled</span>
+          <div className="overlay-panel__window-controls">
+            <button type="button" aria-label="Minimize Chatbut" disabled><Minus size={18} weight="bold" /></button>
+            <button type="button" aria-label="Hide Chatbut" disabled><X size={18} weight="bold" /></button>
+          </div>
         </div>
         <p className="overlay-panel__status">Ready in the dedicated automation tab.</p>
+        <label className="overlay-panel__presence">
+          <span>Presence on enable</span>
+          <select value={presence} disabled aria-label="Presence on enable preview">
+            {presenceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select>
+        </label>
         <dl className="overlay-metrics">
           <div><dt>Replies</dt><dd>0</dd></div>
           <div><dt>Chats</dt><dd>0</dd></div>
@@ -477,9 +502,8 @@ function OverlayPreview({ nextWindow, scheduleLabel, withinSchedule, platform })
           <Button tone="support" icon={Play} disabled>Enable</Button>
           <Button tone="danger" icon={Stop} disabled>Stop</Button>
         </div>
-        <span className="overlay-panel__reassurance">
-          {withinSchedule ? scheduleLabel : nextWindow} · Session safety limit 20
-        </span>
+        <span className="overlay-panel__reassurance">Only new eligible messages · session safety limit 20</span>
+        <span className="overlay-panel__release">Installed bookmark v{RELEASE_VERSION}</span>
       </div>
     </aside>
   );
@@ -496,6 +520,7 @@ function WindowPanel({
   onOpenPlatform,
 }) {
   const [editingSchedule, setEditingSchedule] = useState(false);
+  const [editingPresence, setEditingPresence] = useState(false);
   const [editingDelay, setEditingDelay] = useState(false);
   const [editingFollowUp, setEditingFollowUp] = useState(false);
   const activeNow = isScheduleActive(config);
@@ -520,6 +545,16 @@ function WindowPanel({
     setConfig((current) => ({
       ...current,
       delays: { ...current.delays, [key]: Number(value) },
+    }));
+  }
+
+  function updatePresence(value) {
+    setConfig((current) => ({
+      ...current,
+      platforms: {
+        ...current.platforms,
+        [platform]: { ...current.platforms[platform], presence: value },
+      },
     }));
   }
 
@@ -634,6 +669,32 @@ function WindowPanel({
             </div>
           ) : null}
           <FieldRow
+            Icon={Globe}
+            label="Presence on enable"
+            value={PRESENCE_OPTIONS[platform].find((option) => option.value === platformConfig.presence)?.label ?? "No change"}
+            onClick={() => setEditingPresence((current) => !current)}
+          />
+          {editingPresence ? (
+            <fieldset className="presence-editor">
+              <legend>Default for {platformOption.label}</legend>
+              <div className="presence-options">
+                {PRESENCE_OPTIONS[platform].map((option) => (
+                  <label key={option.value}>
+                    <input
+                      type="radio"
+                      name={`${platform}-presence`}
+                      value={option.value}
+                      checked={platformConfig.presence === option.value}
+                      onChange={(event) => updatePresence(event.target.value)}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+              <p>The widget can override this before Enable. The choice locks while Chatbut is running.</p>
+            </fieldset>
+          ) : null}
+          <FieldRow
             Icon={User}
             label="Direct messages"
             value={`${platformConfig.targeting.directExclusions.length} excluded · group chats need a mention or reply`}
@@ -718,10 +779,8 @@ function WindowPanel({
       </div>
 
       <OverlayPreview
-        nextWindow={nextWindowLabel(config)}
-        scheduleLabel={scheduleLabel}
-        withinSchedule={activeNow}
         platform={platform}
+        presence={platformConfig.presence}
       />
     </section>
   );

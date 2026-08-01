@@ -9,8 +9,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outputDirectory = path.join(root, "public");
 const releasePath = path.join(outputDirectory, "chatbut-release.js");
 const budget = 32 * 1024;
-const mangleProps = /^(handleWindowMessage|handlePortMessage|requestBridge|requestConfig|connectToConfigurator|sendBridge|render|button|setStatus|updateMetrics|updateReleaseState|cancelScheduleWait|armSchedule|syncConversationIndex|enableNow|activate|attachManualGuard|tick|markAutomatedSend|acceptVisibleDirectRequest|acceptVisibleSpaceInvitation|revealSpaceInvitation|connectionNonce|bridgeWindow|bridgePort|connectionTimeout|bridgeRequests|countdownTimer|waitingForSchedule|activating|latestRelease|lastSpaceInviteScan|lastIndexSync|channel|timer|busy|sending|sendChain|automating)$/;
-const teamsMangleProps = new RegExp(`${mangleProps.source.slice(0, -2)}|boot|stop|writeDebug|acceptVisibleRequest|switchApp|collectRows|context|indexedConversation|expandChannelParent|navigateTo|restoreContext|resolveSelfName|saveConfig|clearComposer|sendFor|queueConversation|root|style|scheduleOverride|processed|states|pending|sent|sessionCount|sessionChats|originalContext|unreadState|quarantined|selfName|selfTestArmed|lastChannelScan|successTypes|includeChannels|firstSentAt|secondSentAt|usedTemplates|manual|request|accept|element|ambiguous|unread|muted|mentionedSelf|repliedToSelf|composer|send|draft|ready)$`);
+const mangleProps = /^(handleWindowMessage|handlePortMessage|requestBridge|requestConfig|connectToConfigurator|sendBridge|render|button|setStatus|updateMetrics|updateReleaseState|toggleMinimized|syncPresence|applyPresence|cancelScheduleWait|armSchedule|syncConversationIndex|enableNow|activate|attachManualGuard|tick|markAutomatedSend|acceptVisibleDirectRequest|acceptVisibleSpaceInvitation|revealSpaceInvitation|connectionNonce|bridgeWindow|bridgePort|connectionTimeout|bridgeRequests|countdownTimer|waitingForSchedule|activating|latestRelease|presenceTouched|lastSpaceInviteScan|lastIndexSync|channel|timer|busy|sending|sendChain|automating|root|style)$/;
+const teamsMangleProps = new RegExp(`${mangleProps.source.slice(0, -2)}|node|boot|stop|writeDebug|acceptVisibleRequest|switchApp|collectRows|context|indexedConversation|expandChannelParent|navigateTo|restoreContext|resolveSelfName|saveConfig|clearComposer|sendFor|queueConversation|root|style|scheduleOverride|processed|states|pending|sent|sessionCount|sessionChats|originalContext|unreadState|quarantined|selfName|selfTestArmed|lastChannelScan|successTypes|includeChannels|firstSentAt|secondSentAt|usedTemplates|manual|request|accept|element|ambiguous|unread|muted|mentionedSelf|repliedToSelf|composer|send|draft|ready)$`);
 
 await mkdir(outputDirectory, { recursive: true });
 
@@ -30,10 +30,10 @@ async function buildBookmarklet({ entry, slug, label, properties = mangleProps }
   });
   const bundledRuntime = (await readFile(runtimePath, "utf8")).trim();
   const optimized = await minify(bundledRuntime, {
-    compress: { passes: 5 },
+    compress: { passes: 8, toplevel: true, unsafe_arrows: true, unsafe_methods: true },
     mangle: { toplevel: true },
     ecma: 2022,
-    format: { comments: false },
+    format: { comments: false, ascii_only: true },
   });
   if (!optimized.code) throw new Error(`${label} could not be optimized.`);
   const runtime = optimized.code.trim();

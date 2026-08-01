@@ -16,6 +16,7 @@ function teamsRuntimeConfig() {
   return {
     ...config,
     platform: "teams",
+    presence: config.platforms.teams.presence,
     targeting: config.platforms.teams.targeting,
     invitations: config.platforms.teams.invitations,
   };
@@ -83,7 +84,10 @@ test("Teams widget renders without an innerHTML sink under Trusted Types", () =>
     assert.ok(root);
     assert.equal(root.querySelector('[data-role="status"]').getAttribute("role"), "status");
     assert.ok(root.querySelector(".cb-metrics"));
-    assert.match(root.textContent, /self-test 2/i);
+    assert.match(root.textContent, /Only new eligible messages · session safety limit 20/i);
+    assert.match(root.textContent, /Installed bookmark v0\.3\.3/i);
+    assert.ok(root.querySelector('[data-role="presence"]'));
+    assert.ok(root.querySelector('[data-role="minimize"]'));
     assert.equal(openedWindows.length, 1);
   } finally {
     restoreInnerHtml();
@@ -105,7 +109,7 @@ test("Teams refuses configuration from a stale bridge that cannot provide the wi
       ports: [port],
     }));
     port.onmessage({ data: { type: "chatbut:config", nonce, config: teamsRuntimeConfig() } });
-    assert.match(root.querySelector('[data-role="status"]').textContent, /replace this bookmark/i);
+    assert.match(root.querySelector('[data-role="status"]').textContent, /reinstall/i);
     assert.equal(root.querySelector('[data-role="enable"]').disabled, true);
     assert.equal(root.chatbutRuntime.config, null);
   } finally {
@@ -159,6 +163,85 @@ test("Teams work or school v2 uses the two-tab handoff and excludes meetings fro
     assert.match(dom.window.document.querySelector("style").textContent, /button:focus-visible/);
     assert.equal(dom.window.document.title, "Chatbut automation · Teams");
     assert.match(dom.window.document.querySelector('[data-role="enable"]').textContent, /^Starts in \d{2,}:\d{2}:\d{2}$/);
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Teams ad-hoc presence applies on enable, locks, and resets on stop", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <button data-tid="me-control-avatar-trigger">Profile</button>
+    <div data-tid="me-control-menu-dialog">
+      <span data-tid="me-control-displayname">Operator</span>
+      <div role="menuitem" data-tid="set-presence-status-menu-item" aria-label="Available, change status">Available</div>
+      <div role="menuitemradio" data-tid="me_control_presence_availability_available">Available</div>
+      <div role="menuitemradio" data-tid="me_control_presence_availability_busy">Busy</div>
+      <div role="menuitemradio" data-tid="me_control_presence_availability_appear_away">Away</div>
+    </div>
+  </body></html>`;
+  const { dom, openedWindows, bridgeWindow } = makeDom("https://teams.microsoft.com/v2/", { html });
+  const port = { onmessage: null, start() {}, postMessage() {} };
+  try {
+    const status = dom.window.document.querySelector('[data-tid="set-presence-status-menu-item"]');
+    dom.window.document.querySelector('[data-tid="me_control_presence_availability_busy"]').addEventListener("click", () => {
+      status.setAttribute("aria-label", "Busy, change status");
+    });
+    dom.window.eval(runtime);
+    const root = dom.window.document.getElementById("chatbut-runtime");
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce }, origin: "https://jiannystein.github.io", source: bridgeWindow, ports: [port],
+    }));
+    const config = teamsRuntimeConfig();
+    config.presence = "available";
+    config.schedule = { ...config.schedule, days: [0, 1, 2, 3, 4, 5, 6], windows: [{ start: "00:00", end: "00:00" }] };
+    port.onmessage({ data: { type: "chatbut:config", nonce, config, widgetCss: "#chatbut-runtime main[hidden]{display:none}" } });
+    const select = root.querySelector('[data-role="presence"]');
+    assert.equal(select.value, "available");
+    select.value = "busy";
+    select.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    root.querySelector('[data-role="enable"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 450));
+    assert.equal(root.chatbutRuntime.enabled, true);
+    assert.equal(status.getAttribute("aria-label"), "Busy, change status");
+    assert.equal(select.disabled, true);
+    root.querySelector('[data-role="minimize"]').click();
+    assert.equal(root.querySelector("main").hidden, true);
+    assert.equal(root.chatbutRuntime.enabled, true);
+    root.querySelector('[data-role="minimize"]').click();
+    root.querySelector('[data-role="stop"]').click();
+    assert.equal(select.disabled, false);
+    assert.equal(select.value, "available");
+  } finally {
+    dom.window.close();
+  }
+});
+
+test("Teams presence ambiguity fails closed before automation starts", async () => {
+  const html = `<!doctype html><html><head></head><body>
+    <span data-tid="me-control-displayname">Operator</span>
+    <button data-tid="me-control-avatar-trigger">One</button><button data-tid="me-control-avatar-trigger">Two</button>
+    <div data-tid="set-presence-status-menu-item" aria-label="Available, change status">Available</div>
+    <div data-tid="me_control_presence_availability_busy">Busy</div>
+  </body></html>`;
+  const { dom, openedWindows, bridgeWindow } = makeDom("https://teams.microsoft.com/v2/", { html });
+  const port = { onmessage: null, start() {}, postMessage() {} };
+  try {
+    dom.window.eval(runtime);
+    const root = dom.window.document.getElementById("chatbut-runtime");
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce }, origin: "https://jiannystein.github.io", source: bridgeWindow, ports: [port],
+    }));
+    const config = teamsRuntimeConfig();
+    config.presence = "busy";
+    config.schedule = { ...config.schedule, days: [0, 1, 2, 3, 4, 5, 6], windows: [{ start: "00:00", end: "00:00" }] };
+    port.onmessage({ data: { type: "chatbut:config", nonce, config, widgetCss: "#chatbut-runtime{}" } });
+    root.querySelector('[data-role="enable"]').click();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(root.chatbutRuntime.enabled, false);
+    assert.equal(root.querySelector('[data-role="presence"]').disabled, false);
+    assert.match(root.querySelector('[data-role="status"]').textContent, /Enable stopped.*presence/i);
   } finally {
     dom.window.close();
   }
@@ -371,7 +454,10 @@ test("Teams self chat sends two verified responses and caps the enabled session"
     );
     beforeInput({ isTrusted: true });
     appendSelfMessage("manual-trigger-2", "Test the follow-up response");
-    await runtimeInstance[tickName]();
+    for (let attempt = 0; attempt < 20 && root.querySelector('[data-role="metric-pending"]').textContent !== "1"; attempt += 1) {
+      await runtimeInstance[tickName]();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "1");
     await new Promise((resolve) => setTimeout(resolve, 2_250));
     assert.equal(root.querySelector('[data-role="metric-pending"]').textContent, "0");

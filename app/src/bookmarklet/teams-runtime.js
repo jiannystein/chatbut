@@ -33,11 +33,21 @@ const CHANNEL_NAME = "chatbut-single-instance";
 const PAIRING_TOKEN = "__CHATBUT_PAIRING_TOKEN__";
 const BRIDGE_URL = "__CHATBUT_BRIDGE_URL__";
 const BRIDGE_ORIGIN = new URL(BRIDGE_URL).origin;
+const PRESENCE_ERROR = "Presence not verified.";
 const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
 function uniqueVisible(selector, root = document) {
   const matches = [...root.querySelectorAll(selector)].filter(teamsVisible);
   return matches.length === 1 ? matches[0] : null;
+}
+
+async function waitUnique(selector) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await sleep(100);
+    const match = uniqueVisible(selector);
+    if (match) return match;
+  }
+  return null;
 }
 
 function appendElement(parent, tag, text = "", role = "", className = "") {
@@ -47,10 +57,6 @@ function appendElement(parent, tag, text = "", role = "", className = "") {
   if (className) element.className = className;
   parent.append(element);
   return element;
-}
-
-function styleText() {
-  return `#${ROOT_ID}{position:fixed;z-index:2147483647;right:18px;bottom:18px;background:white}#${ROOT_ID} button{min-height:38px}`;
 }
 
 class TeamsRuntime {
@@ -85,6 +91,7 @@ class TeamsRuntime {
     this.automating = false;
     this.sendChain = Promise.resolve();
     this.selfTestArmed = false;
+    this.presenceTouched = false;
     this.handleWindowMessage = this.handleWindowMessage.bind(this);
     this.handlePortMessage = this.handlePortMessage.bind(this);
   }
@@ -107,6 +114,7 @@ class TeamsRuntime {
     if (event.data?.type === "chatbut:config-changed" && event.data.config) {
       this.config = event.data.config;
       this.syncConversationIndex();
+      this.syncPresence();
       if (!this.enabled && !this.root.hidden) this.armSchedule();
       return;
     }
@@ -117,7 +125,7 @@ class TeamsRuntime {
       clearTimeout(pending.timer);
       if (pending.successTypes.includes(event.data.type)) pending.resolve(event.data);
       else {
-        const error = new Error(String(event.data.message || "The local provider bridge failed."));
+        const error = new Error(String(event.data.message || "Provider bridge failed."));
         error.fatal = Boolean(event.data.fatal);
         pending.reject(error);
       }
@@ -125,18 +133,19 @@ class TeamsRuntime {
     }
     if (event.data?.type === "chatbut:error") {
       clearTimeout(this.connectionTimeout);
-      this.setStatus(String(event.data.message || "The configurator could not connect."));
+      this.setStatus(String(event.data.message || "Configurator disconnected."));
       return;
     }
     if (event.data?.type !== "chatbut:config") return;
     clearTimeout(this.connectionTimeout);
     if (!event.data.widgetCss) {
-      this.setStatus("Replace this bookmark from Chatbut.");
+      this.setStatus("Reinstall from Chatbut.");
       return;
     }
     this.style.textContent = event.data.widgetCss;
     this.config = event.data.config;
-    this.root.querySelector('[data-role="connect"]').hidden = true;
+    this.node("connect").hidden = true;
+    this.syncPresence();
     this.setStatus(`Connected to ${String(event.data.fileName || "local configuration")}.`, "ok");
     this.syncConversationIndex();
     this.armSchedule();
@@ -145,14 +154,14 @@ class TeamsRuntime {
   requestBridge(type, payload, successTypes, timeoutMs = 45_000) {
     return new Promise((resolve, reject) => {
       if (!this.bridgePort) {
-        reject(new Error("The local provider bridge is not connected."));
+        reject(new Error("Provider bridge disconnected."));
         return;
       }
       const requestId = globalThis.crypto?.randomUUID?.()
         || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const timer = setTimeout(() => {
         this.bridgeRequests.delete(requestId);
-        reject(new Error("The local provider request timed out."));
+        reject(new Error("Provider request timed out."));
       }, timeoutMs);
       this.bridgeRequests.set(requestId, { resolve, reject, timer, successTypes });
       this.sendBridge(type, { ...payload, requestId });
@@ -176,7 +185,7 @@ class TeamsRuntime {
     this.sendBridge("chatbut:request-config");
     clearTimeout(this.connectionTimeout);
     this.connectionTimeout = setTimeout(() => {
-      if (!this.config) this.setStatus("No local configuration was found. Return to Chatbut, create one, then retry.");
+      if (!this.config) this.setStatus("No config. Save in Chatbut.");
     }, 6_000);
   }
 
@@ -184,10 +193,10 @@ class TeamsRuntime {
     this.connectionNonce = globalThis.crypto?.randomUUID?.()
       || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
     this.config = null;
-    this.root.querySelector('[data-role="enable"]').disabled = true;
-    this.root.querySelector('[data-role="connect"]').hidden = false;
+    this.node("enable").disabled = true;
+    this.node("connect").hidden = false;
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(PAIRING_TOKEN)) {
-      this.setStatus("Bookmark not paired. Reinstall it from Chatbut.");
+      this.setStatus("Not paired. Reinstall.");
       return;
     }
     if (this.bridgePort) {
@@ -195,12 +204,12 @@ class TeamsRuntime {
       this.requestConfig();
       return;
     }
-    this.setStatus("Requesting your configuration…");
+    this.setStatus("Requesting config…");
     this.bridgeWindow = window.open(
       `${BRIDGE_URL}#${PAIRING_TOKEN}.${this.connectionNonce}.handoff.${PLATFORM_ID}`,
       "_blank",
     );
-    if (!this.bridgeWindow) this.setStatus("Chrome blocked the helper tab. Allow it, then retry.");
+    if (!this.bridgeWindow) this.setStatus("Helper blocked. Allow and retry.");
   }
 
   boot() {
@@ -217,7 +226,7 @@ class TeamsRuntime {
       return;
     }
     if (!window.confirm(
-      "Chatbut will keep this tab open for Teams automation and open a second Teams tab for normal use. Leave this tab open after enabling. Continue?",
+      "Use this tab for Chatbut? Keep it open; use second tab normally.",
     )) return;
     this.render();
     this.root.chatbutRuntime = this;
@@ -225,7 +234,7 @@ class TeamsRuntime {
     window.addEventListener("message", this.handleWindowMessage);
     this.channel = new BroadcastChannel(CHANNEL_NAME);
     this.channel.onmessage = (event) => {
-      if (event.data === "enabled" && this.enabled) this.stop("Another Teams tab enabled Chatbut.");
+      if (event.data === "enabled" && this.enabled) this.stop("Chatbut enabled in another Teams tab.");
       if (event.data === "probe" && this.enabled) this.channel.postMessage("enabled");
     };
     this.channel.postMessage("probe");
@@ -234,20 +243,30 @@ class TeamsRuntime {
 
   render() {
     const style = document.createElement("style");
-    style.textContent = styleText();
     document.head.append(style);
     this.style = style;
     this.root = document.createElement("section");
     this.root.id = ROOT_ID;
-    this.root.setAttribute("aria-label", "Chatbut Teams controls");
+    this.root.setAttribute("aria-label", "Chatbut controls");
     const header = appendElement(this.root, "header");
-    appendElement(header, "strong", `Chatbut v${RELEASE_VERSION}`);
+    appendElement(header, "strong", "Chatbut");
     appendElement(header, "span", "Disabled", "mode");
-    const close = appendElement(header, "button", "×", "", "cb-close");
+    const windowControls = appendElement(header, "div", "", "", "cb-window");
+    const minimize = appendElement(windowControls, "button", "−", "minimize");
+    minimize.setAttribute("aria-label", "Minimize");
+    const close = appendElement(windowControls, "button", "×");
     close.setAttribute("aria-label", "Hide Chatbut");
     const main = appendElement(this.root, "main");
     const status = appendElement(main, "p", "", "status", "cb-status");
     status.setAttribute("role", "status");
+    const presence = appendElement(main, "label", "Presence", "", "cb-presence");
+    const presenceSelect = appendElement(presence, "select", "", "presence");
+    presenceSelect.setAttribute("aria-label", "Presence");
+    for (const [value, label] of [["none", "No change"], ["available", "Available"], ["busy", "Busy"], ["away", "Away"]]) {
+      const option = appendElement(presenceSelect, "option", label);
+      option.value = value;
+    }
+    presenceSelect.addEventListener("change", () => { this.presenceTouched = true; });
     const metrics = appendElement(main, "dl", "", "", "cb-metrics");
     for (const [label, role] of [["Replies", "metric-replies"], ["Chats", "metric-chats"], ["Pending", "metric-pending"]]) {
       const metric = appendElement(metrics, "div");
@@ -255,36 +274,56 @@ class TeamsRuntime {
       appendElement(metric, "dd", "0", role);
     }
     const actions = appendElement(main, "div", "", "", "cb-actions");
-    appendElement(actions, "button", "Retry", "connect");
+    const connect = appendElement(actions, "button", "Retry", "connect");
     const enable = appendElement(actions, "button", "Enable", "enable", "cb-primary");
     enable.disabled = true;
-    appendElement(actions, "button", "Enable now", "override").hidden = true;
-    appendElement(actions, "button", "Stop", "stop", "cb-stop").hidden = true;
-    appendElement(main, "p", "New messages · no meetings · self-test 2 · session 20", "", "cb-mini");
-    this.root.querySelector(".cb-close").addEventListener("click", () => {
+    const override = appendElement(actions, "button", "Enable now", "override");
+    override.hidden = true;
+    const stop = appendElement(actions, "button", "Stop", "stop", "cb-stop");
+    stop.hidden = true;
+    const footer = appendElement(main, "div", "", "", "cb-footer");
+    appendElement(footer, "p", "Only new eligible messages · session safety limit 20", "", "cb-mini");
+    appendElement(footer, "p", `Installed bookmark v${RELEASE_VERSION}`, "", "cb-mini");
+    minimize.addEventListener("click", () => {
+      main.hidden = !main.hidden;
+      minimize.textContent = main.hidden ? "+" : "−";
+      minimize.setAttribute("aria-label", main.hidden ? "Expand" : "Minimize");
+    });
+    close.addEventListener("click", () => {
       if (!this.enabled) this.cancelScheduleWait();
       this.root.hidden = true;
     });
-    this.root.querySelector('[data-role="connect"]').addEventListener("click", () => this.connectToConfigurator());
-    this.root.querySelector('[data-role="enable"]').addEventListener("click", () => this.enableNow());
-    this.root.querySelector('[data-role="override"]').addEventListener("click", () => this.enableNow());
-    this.root.querySelector('[data-role="stop"]').addEventListener("click", () => this.stop("Stopped by you."));
+    connect.addEventListener("click", () => this.connectToConfigurator());
+    enable.addEventListener("click", () => this.enableNow());
+    override.addEventListener("click", () => this.enableNow());
+    stop.addEventListener("click", () => this.stop("Stopped by you."));
     document.body.append(this.root);
     this.updateMetrics();
   }
 
   setStatus(message, tone = "") {
     if (!this.root) return;
-    const status = this.root.querySelector('[data-role="status"]');
+    const status = this.node("status");
     status.textContent = message;
     status.dataset.tone = tone;
   }
 
   updateMetrics() {
     if (!this.root) return;
-    this.root.querySelector('[data-role="metric-replies"]').textContent = String(this.sessionCount);
-    this.root.querySelector('[data-role="metric-chats"]').textContent = String(this.sessionChats.size);
-    this.root.querySelector('[data-role="metric-pending"]').textContent = String(this.pending.size);
+    this.node("metric-replies").textContent = String(this.sessionCount);
+    this.node("metric-chats").textContent = String(this.sessionChats.size);
+    this.node("metric-pending").textContent = String(this.pending.size);
+  }
+
+  node(role) {
+    return this.root?.querySelector(`[data-role="${role}"]`);
+  }
+
+  syncPresence() {
+    const select = this.node("presence");
+    if (select && !this.enabled && !this.activating && !this.presenceTouched) {
+      select.value = this.config?.presence || "none";
+    }
   }
 
   cancelScheduleWait() {
@@ -298,8 +337,8 @@ class TeamsRuntime {
     this.cancelScheduleWait();
     if (!this.config || this.enabled) return;
     const validation = validateRuntimeConfig(this.config);
-    const enable = this.root.querySelector('[data-role="enable"]');
-    const override = this.root.querySelector('[data-role="override"]');
+    const enable = this.node("enable");
+    const override = this.node("override");
     if (!validation.valid) {
       enable.disabled = true;
       override.hidden = true;
@@ -314,8 +353,8 @@ class TeamsRuntime {
       enable.disabled = false;
       enable.textContent = "Enable";
       override.hidden = true;
-      this.root.querySelector('[data-role="mode"]').textContent = "Disabled";
-      this.setStatus("Ready. Keep this Teams tab open.", "ok");
+      this.node("mode").textContent = "Disabled";
+      this.setStatus("Ready. Keep tab open.", "ok");
       return;
     }
     let next = Date.now() + 60_000;
@@ -325,14 +364,14 @@ class TeamsRuntime {
     if (next > limit) {
       enable.disabled = true;
       override.hidden = true;
-      this.setStatus("No upcoming window was found. Review the schedule in Chatbut.");
+      this.setStatus("No upcoming window. Check schedule.");
       return;
     }
     this.waitingForSchedule = true;
     enable.disabled = true;
     override.hidden = false;
-    this.root.querySelector('[data-role="mode"]').textContent = "Waiting";
-    this.setStatus("Waiting for the next response window. Leave this tab open.");
+    this.node("mode").textContent = "Waiting";
+    this.setStatus("Waiting for next window. Keep tab open.");
     const update = () => {
       if (!this.waitingForSchedule || this.enabled) return;
       if (isRuntimeScheduleActive(this.config)) {
@@ -454,8 +493,7 @@ class TeamsRuntime {
   async resolveSelfName() {
     let name = visibleTeamsSelfName();
     if (name) return name;
-    const control = uniqueVisible('[data-tid="me-control-avatar-trigger"]')
-      || uniqueVisible('button[aria-label*="account manager" i], button[aria-label*="profile" i]');
+    const control = uniqueVisible('[data-tid="me-control-avatar-trigger"]');
     if (!control) return "";
     control.click();
     for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -466,6 +504,27 @@ class TeamsRuntime {
     const dialog = uniqueVisible('[data-tid="me-control-menu-dialog"]');
     if (dialog) document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     return name;
+  }
+
+  async applyPresence() {
+    const select = this.node("presence");
+    const value = select.value;
+    if (value === "none") return;
+    const profile = uniqueVisible('[data-tid="me-control-avatar-trigger"]');
+    if (!profile) throw new Error(PRESENCE_ERROR);
+    profile.click();
+    const change = await waitUnique('[data-tid="set-presence-status-menu-item"]');
+    if (!change) throw new Error(PRESENCE_ERROR);
+    change.click();
+    const suffix = value === "away" ? "appear_away" : value;
+    const item = await waitUnique(`[data-tid="me_control_presence_availability_${suffix}"]`);
+    if (!item) throw new Error(PRESENCE_ERROR);
+    item.click();
+    const expected = value === "away" ? /away/i : new RegExp(value, "i");
+    await sleep(200);
+    const verified = expected.test(change.getAttribute("aria-label") || teamsText(change));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    if (!verified) throw new Error(PRESENCE_ERROR);
   }
 
   async saveConfig() {
@@ -508,7 +567,7 @@ class TeamsRuntime {
     }
     const outsideSchedule = !isRuntimeScheduleActive(this.config);
     if (outsideSchedule && !window.confirm(
-      "You are outside the configured schedule. Enable anyway until you stop Chatbut or reload this page?",
+      "Outside schedule. Enable anyway?",
     )) {
       this.armSchedule();
       return;
@@ -528,11 +587,14 @@ class TeamsRuntime {
       return;
     }
     this.activating = true;
+    const presence = this.node("presence");
+    presence.disabled = true;
     try {
       this.selfName = await this.resolveSelfName();
-      if (!this.selfName) throw new Error("Open your Teams profile menu, close it, then retry.");
+      if (!this.selfName) throw new Error("Identity not verified.");
+      await this.applyPresence();
       if (this.config.llm.enabled) {
-        this.setStatus("Checking the active LLM connection…");
+        this.setStatus("Checking the LLM connection…");
         const result = await this.requestBridge("chatbut:validate-active", {}, ["chatbut:active-valid"]);
         const connection = this.config.llm.connections.find((item) => item.providerId === this.config.llm.activeProviderId);
         if (connection) {
@@ -549,6 +611,7 @@ class TeamsRuntime {
     } catch (error) {
       this.setStatus(`Enable stopped: ${error.message}`);
       this.activating = false;
+      presence.disabled = false;
       return;
     }
     this.cancelScheduleWait();
@@ -562,16 +625,16 @@ class TeamsRuntime {
     this.sessionChats.clear();
     this.sendChain = Promise.resolve();
     this.selfTestArmed = false;
-    this.root.querySelector('[data-role="enable"]').hidden = true;
-    this.root.querySelector('[data-role="override"]').hidden = true;
-    this.root.querySelector('[data-role="stop"]').hidden = false;
-    this.root.querySelector('[data-role="mode"]').textContent = "Enabled";
+    this.node("enable").hidden = true;
+    this.node("override").hidden = true;
+    this.node("stop").hidden = false;
+    this.node("mode").textContent = "Enabled";
     this.updateMetrics();
     this.channel?.postMessage("enabled");
     this.setStatus(
       scheduleOverride
-        ? "Schedule overridden. Watching new messages; meetings ignored."
-        : "Watching new messages; meetings ignored.",
+        ? "Schedule overridden. Watching; no meetings."
+        : "Watching; no meetings.",
       "ok",
     );
     this.writeDebug("enabled", { conversation: this.originalContext?.id, quarantined: this.quarantined.size });
@@ -590,9 +653,13 @@ class TeamsRuntime {
     this.pending.clear();
     this.updateMetrics();
     if (this.root) {
-      this.root.querySelector('[data-role="enable"]').hidden = false;
-      this.root.querySelector('[data-role="stop"]').hidden = true;
-      this.root.querySelector('[data-role="mode"]').textContent = "Disabled";
+      const presence = this.node("presence");
+      presence.disabled = false;
+      this.presenceTouched = false;
+      presence.value = this.config?.presence || "none";
+      this.node("enable").hidden = false;
+      this.node("stop").hidden = true;
+      this.node("mode").textContent = "Disabled";
     }
     this.setStatus(reason || "Disabled.");
     this.writeDebug("disabled", { reason });
@@ -623,7 +690,7 @@ class TeamsRuntime {
   async tick() {
     if (!this.enabled || this.busy || this.sending) return;
     if (!this.scheduleOverride && !isRuntimeScheduleActive(this.config)) {
-      this.stop("The scheduled window closed. Enable again in the next window.");
+      this.stop("Window closed. Enable next window.");
       return;
     }
     this.busy = true;
@@ -748,7 +815,7 @@ class TeamsRuntime {
     try {
     if (!this.enabled || (!this.scheduleOverride && !isRuntimeScheduleActive(this.config))) return;
     if (this.sessionCount >= 20) {
-      this.stop("Safety limit reached. Enable again in the next scheduled window.");
+        this.stop("Safety limit reached. Enable next window.");
       return;
     }
     const previous = this.context();
@@ -825,7 +892,7 @@ class TeamsRuntime {
       }
       if (!lease.granted) {
         this.clearComposer(ready.composer);
-        this.setStatus("Global safety limit reached. Waiting for the five-minute window to clear.");
+        this.setStatus("Global limit reached. Waiting 5 minutes.");
         this.writeDebug("skip", { id: item.id, reason: "global_send_limit", retryAfterMs: lease.retryAfterMs });
         await this.restoreContext(previous);
         return;
@@ -854,7 +921,7 @@ class TeamsRuntime {
         }
       }
       if (!sentId) {
-        this.stop("Send verification failed. Check Teams before enabling again.");
+        this.stop("Send not verified. Check Teams and retry.");
         return;
       }
       this.processed.add(sentId);
@@ -872,10 +939,10 @@ class TeamsRuntime {
     this.sessionCount += 1;
     this.sessionChats.add(item.id);
     this.updateMetrics();
-    this.setStatus("Reply sent. Watching new eligible Teams messages.", "ok");
+    this.setStatus("Reply sent. Watching.", "ok");
     this.writeDebug("sent", { id: item.id, triggerId, vaultName, fallback, reply });
     await this.restoreContext(previous);
-    if (stopAfterSend) this.stop("The saved response was sent, then Chatbut stopped because the active LLM connection needs attention.");
+    if (stopAfterSend) this.stop("Reply sent. Stopped; LLM needs attention.");
     } finally {
       this.pending.delete(item.id);
       this.updateMetrics();

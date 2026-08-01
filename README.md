@@ -53,6 +53,11 @@ require Chatbut updates.
   Chatbut enables when that window opens while the same tab remains open.
 - Use **Enable now** outside the schedule after an explicit one-session
   warning, or stop immediately at any time.
+- Minimize the live widget without stopping automation; **Hide** remains a
+  separate display-only control.
+- Optionally choose a presence to apply when Chatbut enables. Each platform has
+  a saved default and a one-session widget override; **No change** is the safe
+  default. The live selector locks while Chatbut is enabled.
 - Cover 1:1 direct messages except platform-specific saved exclusions.
 - Cover multi-person DMs except exclusions only when the message contains a
   verified self-`@mention` or direct reply.
@@ -109,7 +114,7 @@ Chatbut sends the original saved response.
 3. Review the schedule, people, reply vaults, and safety settings. The default
    window is Monday–Friday, 06:00–08:00 in the browser's timezone.
 4. Select **Google** or **Teams**, then drag the displayed
-   **💬 Google v0.3.2** or **💬 Teams v0.3.2** button into
+   **💬 Google v0.3.3** or **💬 Teams v0.3.3** button into
    Chrome's bookmarks bar. The bookmarklets are independent; install both if
    you use both platforms.
 5. Select **Open Google Chat** or **Open Teams**. Teams support is limited to
@@ -117,7 +122,8 @@ Chatbut sends the original saved response.
 6. On that chat page, click its matching Chatbut bookmark. The tab asks for
    confirmation, becomes the dedicated automation tab, and opens a clean tab
    for normal use. Leave the original automation tab open.
-7. In the dedicated automation tab, review the compact status panel. Select
+7. In the dedicated automation tab, review the compact status panel. Keep the
+   saved presence default, or choose a one-session override, then select
    **Enable** while the window is open. Before a window, leave the countdown
    running or select **Enable now** and confirm the override.
 
@@ -135,6 +141,12 @@ restore the platform-specific name shown in Chatbut.
 The configurator may be closed after the bookmark connects. Chatbut remains
 disabled after the chat client reloads, Chrome restarts, or the tab closes;
 click the matching bookmark again to begin a new session.
+
+Presence changes are optional and disabled by default. Google offers Active,
+Do not disturb, and Away; Teams offers Available, Busy, and Away. Chatbut
+applies and verifies the selected value when the session enables, but does not
+restore an earlier value on Stop because activity, calendar state, or a manual
+change may have updated it in the meantime.
 
 LLM adaptation is optional. To add it, open **Replies → LLM connections**,
 choose a provider, enter your key, and select **Validate and save**. Chatbut
@@ -234,10 +246,10 @@ Read [SECURITY.md](SECURITY.md) before testing with workplace conversations.
 
 ## Verification
 
-The v0.3.2 release passed 64 runtime, adapter, configuration, targeting,
+The v0.3.3 release passed 70 runtime, adapter, configuration, targeting,
 provider, and bridge tests plus 4 hosting/package tests on 2026-08-01. The
-encoded Google Chat bookmarklet is 31,526 bytes and the Teams bookmarklet is
-32,627 bytes, each against an independently enforced 32,768-byte limit.
+encoded Google Chat bookmarklet is 32,663 bytes and the Teams bookmarklet is
+32,767 bytes, each against an independently enforced 32,768-byte limit.
 
 Earlier coordinated desktop-Chrome acceptance confirmed Google Chat first
 replies in independent
@@ -260,13 +272,14 @@ live Teams editor rerender: the test message queued, then cleared without a
 reply, and the waiting button lacked Google Chat's countdown. v0.3.2 keeps the
 item pending through the send attempt, writes through Teams' live CKEditor
 model, reacquires the live editor and send control, and shows
-`Starts in HH:MM:SS`. Its deterministic fixture now completes the
-first reply, follow-up reply, and two-response session cap. This v0.3.2 send
-path also passed a controlled work-profile self-chat send: the reply rendered
-as the signed-in account, the widget reached 1 reply, 1 chat, 0 pending, and
-the session stopped cleanly. The fully automatic first/follow-up user sequence,
-ordinary incoming auto-reply, Combined view, opted-in channel, and request
-acceptance still require live acceptance.
+`Starts in HH:MM:SS`. Its deterministic fixture completes the first reply,
+follow-up reply, and two-response session cap. The full work-profile self-chat
+sequence has now passed live: each manual self-message produced one reply, the
+pending counter returned to zero, and no third reply was allowed in the
+enabled session. v0.3.3 adds shared footer copy, non-stopping minimize controls,
+and default-off presence selection with enable-time application, verification,
+and lockout. Ordinary incoming auto-reply, Combined view, opted-in channel,
+request acceptance, and live presence mutation still require acceptance.
 
 ## Teams support status
 
