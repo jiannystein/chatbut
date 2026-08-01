@@ -21,6 +21,7 @@ import { isNewerRelease, RELEASE_VERSION } from "../release.js";
 
 const ROOT_ID = "chatbut-runtime";
 const CHANNEL_NAME = "chatbut-single-instance";
+const PLATFORM_ID = "googleChat";
 const ROW_SELECTOR = '[role="listitem"][data-group-id]';
 const MAIN_SELECTOR = '[role="main"][data-group-id]';
 const MESSAGE_SELECTOR = '[role="group"][data-id][data-user-id]';
@@ -168,7 +169,7 @@ class BridgeDebugWriter {
       at: new Date().toISOString(),
       event,
       details: redactLogValue(
-        details,
+        { platform: PLATFORM_ID, ...details },
         this.config.llm.connections.map((connection) => connection.apiKey),
       ),
     });
@@ -316,7 +317,7 @@ class ChatbutRuntime {
     }
     this.setStatus("Requesting your configuration…");
     this.bridgeWindow = window.open(
-      `${BRIDGE_URL}#${PAIRING_TOKEN}.${this.connectionNonce}.handoff`,
+      `${BRIDGE_URL}#${PAIRING_TOKEN}.${this.connectionNonce}.handoff.${PLATFORM_ID}`,
       "_blank",
     );
     if (!this.bridgeWindow) {
@@ -818,11 +819,38 @@ class ChatbutRuntime {
         if (previousId) await navigateTo(previousId);
         return;
       }
+      let lease;
+      try {
+        lease = await this.requestBridge(
+          "chatbut:request-send-lease",
+          {},
+          ["chatbut:send-lease"],
+          6_000,
+        );
+      } catch (error) {
+        composer.textContent = "";
+        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContent" }));
+        await this.debug?.write("skip", { id, reason: "send_lease_unavailable", message: error.message });
+        if (previousId) await navigateTo(previousId);
+        return;
+      }
+      if (!lease.granted) {
+        composer.textContent = "";
+        composer.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "deleteContent" }));
+        this.setStatus("Global safety limit reached. Waiting for the five-minute window to clear.");
+        await this.debug?.write("skip", { id, reason: "global_send_limit", retryAfterMs: lease.retryAfterMs });
+        if (previousId) await navigateTo(previousId);
+        return;
+      }
       const messagesBeforeSend = new Set(
         [...conversation.main.querySelectorAll(MESSAGE_SELECTOR)].map((group) => group.dataset.id),
       );
       send[0].click();
-      await this.markAutomatedSend(conversation.main, messagesBeforeSend);
+      const verified = await this.markAutomatedSend(conversation.main, messagesBeforeSend);
+      if (!verified) {
+        this.stop("Send verification failed. Check Google Chat before enabling again.");
+        return;
+      }
     } finally {
       this.automating = false;
     }
@@ -854,8 +882,9 @@ class ChatbutRuntime {
       if (!sentGroup) continue;
       sentGroup.dataset.chatbutSelf = "true";
       this.processed.add(sentGroup.dataset.id);
-      return;
+      return true;
     }
+    return false;
   }
 
   async acceptVisibleDirectRequest() {

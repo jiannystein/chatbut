@@ -8,7 +8,7 @@ const source = await readFile(
   "utf8",
 );
 
-function runBridge(mode = "") {
+function runBridge(mode = "", platform = "googleChat") {
   const calls = { close: 0, replace: [], openerMessages: [], workerMessages: [] };
   const port = {
     start() {},
@@ -18,7 +18,7 @@ function runBridge(mode = "") {
   const context = {
     document: { getElementById: () => status },
     location: {
-      hash: `#${"a".repeat(32)}.nonce-value${mode ? `.${mode}` : ""}`,
+      hash: `#${"a".repeat(32)}.nonce-value${mode ? `.${mode}.${platform}` : ""}`,
       replace(url) { calls.replace.push(url); },
     },
     SharedWorker: class {
@@ -32,7 +32,7 @@ function runBridge(mode = "") {
       close() { calls.close += 1; },
       setTimeout(callback) { callback(); },
     },
-    CHATBUT_RELEASE_VERSION: "0.2.0",
+    CHATBUT_RELEASE_VERSION: "0.3.0",
   };
   vm.runInNewContext(source, context);
   return { calls, status };
@@ -44,7 +44,16 @@ test("handoff bridge becomes a clean Google Chat tab after transferring the port
   assert.equal(calls.replace[0], "https://chat.google.com/app/home");
   assert.equal(calls.close, 0);
   assert.match(status.textContent, /Opening a clean Google Chat tab/i);
-  assert.equal(calls.workerMessages[0].releaseVersion, "0.2.0");
+  assert.equal(calls.workerMessages[0].releaseVersion, "0.3.0");
+  assert.equal(calls.workerMessages[0].platform, "googleChat");
+});
+
+test("Teams handoff returns the helper tab to the work or school v2 client", () => {
+  const { calls, status } = runBridge("handoff", "teams");
+  assert.equal(calls.openerMessages[0][1], "https://teams.microsoft.com");
+  assert.equal(calls.workerMessages[0].platform, "teams");
+  assert.equal(calls.replace[0], "https://teams.microsoft.com/v2/");
+  assert.match(status.textContent, /clean Teams tab/i);
 });
 
 test("legacy bridge still closes after transferring the port", () => {

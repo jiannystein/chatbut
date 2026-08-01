@@ -1,4 +1,4 @@
-export const RELEASE_VERSION = "0.2.0";
+export const RELEASE_VERSION = "0.3.0";
 
 function versionParts(value) {
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(value ?? "").trim());
