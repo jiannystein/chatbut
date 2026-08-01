@@ -520,9 +520,11 @@ class TeamsRuntime {
     const item = await waitUnique(`[data-tid="me_control_presence_availability_${suffix}"]`);
     if (!item) throw new Error(PRESENCE_ERROR);
     item.click();
-    const expected = value === "away" ? /away/i : new RegExp(value, "i");
-    await sleep(200);
-    const verified = expected.test(change.getAttribute("aria-label") || teamsText(change));
+    let verified = false;
+    for (let attempt = 0; attempt < 20 && !verified; attempt += 1) {
+      await sleep(150);
+      verified = (change.getAttribute("aria-label") || teamsText(change)).toLowerCase().includes(value);
+    }
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     if (!verified) throw new Error(PRESENCE_ERROR);
   }
