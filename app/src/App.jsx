@@ -223,10 +223,8 @@ function InfoTip({ children }) {
 }
 
 function BookmarkletLink({ href, platform, disabled = false }) {
-  const platformLabel = PLATFORM_OPTIONS.find((item) => item.id === platform)?.label ?? "Chat";
-  const bookmarkName = platform === "teams"
-    ? `💬 Teams v${RELEASE_VERSION}`
-    : `💬 ${platformLabel} v${RELEASE_VERSION}`;
+  const platformLabel = PLATFORM_OPTIONS.find((item) => item.id === platform)?.shortLabel ?? "Chat";
+  const bookmarkName = `💬 ${platformLabel} v${RELEASE_VERSION}`;
   const anchorRef = useRef(null);
   useEffect(() => {
     anchorRef.current?.setAttribute("href", href);
@@ -867,7 +865,7 @@ function TargetManager({ config, setConfig, platform }) {
           <span>
             {normalizedQuery
               ? "Try a shorter name."
-              : `Run the ${platform === "teams" ? `💬 Teams v${RELEASE_VERSION}` : `💬 Google Chat v${RELEASE_VERSION}`} bookmark once. Recent conversations will appear here automatically.`}
+              : `Run the 💬 ${platform === "teams" ? "Teams" : "Google"} v${RELEASE_VERSION} bookmark once. Recent conversations will appear here automatically.`}
           </span>
         </div>
       )}
@@ -1467,7 +1465,7 @@ export function App() {
       })
       .then(([googleChat, teams]) => {
         if (!cancelled) {
-          const bridgeUrl = new URL("./chatbut-bridge.html", window.location.href).href;
+          const bridgeUrl = new URL(`./chatbut-bridge.html?v=${RELEASE_VERSION}`, window.location.href).href;
           const prepare = (value) => value.trim()
               .replace(PAIRING_TOKEN_PLACEHOLDER, pairingToken)
               .replace(BRIDGE_URL_PLACEHOLDER, encodeURIComponent(bridgeUrl));
@@ -1514,8 +1512,8 @@ export function App() {
 
     let worker;
     try {
-      worker = new SharedWorker("./chatbut-bridge-worker.js", {
-        name: "chatbut-config-bridge",
+      worker = new SharedWorker(`./chatbut-bridge-worker.js?v=${RELEASE_VERSION}`, {
+        name: `chatbut-config-bridge-v${RELEASE_VERSION}`,
       });
     } catch {
       setMessage({

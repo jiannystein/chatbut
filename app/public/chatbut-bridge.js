@@ -14,6 +14,7 @@ const platforms = {
 };
 const platform = platforms[platformValue];
 const releaseVersion = String(globalThis.CHATBUT_RELEASE_VERSION || "");
+const validRelease = /^\d+\.\d+\.\d+$/.test(releaseVersion);
 
 function fail(message) {
   status.textContent = message;
@@ -26,14 +27,15 @@ if (
   || !/^[A-Za-z0-9_-]{32,128}$/.test(token)
   || nonce.length < 8
   || !platform
+  || !validRelease
 ) {
   fail("This connection request is invalid. Close this tab and retry Chatbut.");
 } else if (typeof SharedWorker !== "function") {
   fail("SharedWorker is blocked in this Chrome profile.");
 } else {
   try {
-    const worker = new SharedWorker("./chatbut-bridge-worker.js", {
-      name: "chatbut-config-bridge",
+    const worker = new SharedWorker(`./chatbut-bridge-worker.js?v=${releaseVersion}`, {
+      name: `chatbut-config-bridge-v${releaseVersion}`,
     });
     worker.port.start();
     worker.port.postMessage({

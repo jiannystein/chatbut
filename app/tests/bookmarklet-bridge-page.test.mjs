@@ -7,9 +7,13 @@ const source = await readFile(
   new URL("../public/chatbut-bridge.js", import.meta.url),
   "utf8",
 );
+const html = await readFile(
+  new URL("../public/chatbut-bridge.html", import.meta.url),
+  "utf8",
+);
 
 function runBridge(mode = "", platform = "googleChat") {
-  const calls = { close: 0, replace: [], openerMessages: [], workerMessages: [] };
+  const calls = { close: 0, replace: [], openerMessages: [], workerMessages: [], workers: [] };
   const port = {
     start() {},
     postMessage(message) { calls.workerMessages.push(message); },
@@ -22,7 +26,10 @@ function runBridge(mode = "", platform = "googleChat") {
       replace(url) { calls.replace.push(url); },
     },
     SharedWorker: class {
-      constructor() { this.port = port; }
+      constructor(url, options) {
+        calls.workers.push({ url, options });
+        this.port = port;
+      }
     },
     window: {
       opener: {
@@ -32,7 +39,7 @@ function runBridge(mode = "", platform = "googleChat") {
       close() { calls.close += 1; },
       setTimeout(callback) { callback(); },
     },
-    CHATBUT_RELEASE_VERSION: "0.3.0",
+    CHATBUT_RELEASE_VERSION: "0.3.1",
   };
   vm.runInNewContext(source, context);
   return { calls, status };
@@ -44,8 +51,10 @@ test("handoff bridge becomes a clean Google Chat tab after transferring the port
   assert.equal(calls.replace[0], "https://chat.google.com/app/home");
   assert.equal(calls.close, 0);
   assert.match(status.textContent, /Opening a clean Google Chat tab/i);
-  assert.equal(calls.workerMessages[0].releaseVersion, "0.3.0");
+  assert.equal(calls.workerMessages[0].releaseVersion, "0.3.1");
   assert.equal(calls.workerMessages[0].platform, "googleChat");
+  assert.equal(calls.workers[0].url, "./chatbut-bridge-worker.js?v=0.3.1");
+  assert.equal(calls.workers[0].options.name, "chatbut-config-bridge-v0.3.1");
 });
 
 test("Teams handoff returns the helper tab to the work or school v2 client", () => {
@@ -60,4 +69,10 @@ test("legacy bridge still closes after transferring the port", () => {
   const { calls } = runBridge();
   assert.equal(calls.close, 1);
   assert.equal(calls.replace.length, 0);
+});
+
+test("bridge HTML cache-busts its release and bridge scripts with the bookmark version", () => {
+  assert.match(html, /URLSearchParams\(location\.search\)/);
+  assert.match(html, /chatbut-release\.js/);
+  assert.match(html, /chatbut-bridge\.js/);
 });

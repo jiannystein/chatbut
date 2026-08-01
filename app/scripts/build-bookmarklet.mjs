@@ -45,7 +45,7 @@ async function buildBookmarklet({ entry, slug, label, properties = mangleProps }
     .replace("__CHATBUT_PAIRING_TOKEN__", "a".repeat(32))
     .replace(
       "__CHATBUT_BRIDGE_URL__",
-      encodeURIComponent("https://jiannystein.github.io/chatbut/chatbut-bridge.html"),
+      encodeURIComponent(`https://jiannystein.github.io/chatbut/chatbut-bridge.html?v=${RELEASE_VERSION}`),
     );
   const bytes = Buffer.byteLength(distributedBookmarklet, "utf8");
   if (bytes > budget) throw new Error(`${label} bookmarklet is ${bytes} bytes; budget is ${budget}.`);
