@@ -108,7 +108,7 @@ test("Google widget shows its installed version before the bridge connects", () 
   try {
     dom.window.eval(runtime);
     const root = dom.window.document.getElementById("chatbut-runtime");
-    assert.match(root.textContent, /Installed bookmark v0\.3\.7/i);
+    assert.match(root.textContent, /Installed bookmark v0\.3\.8/i);
   } finally {
     dom.window.close();
   }
