@@ -83,10 +83,32 @@ test("Teams widget renders without an innerHTML sink under Trusted Types", () =>
     assert.ok(root);
     assert.equal(root.querySelector('[data-role="status"]').getAttribute("role"), "status");
     assert.ok(root.querySelector(".cb-metrics"));
-    assert.match(root.textContent, /self-test limit 2/i);
+    assert.match(root.textContent, /self-test 2/i);
     assert.equal(openedWindows.length, 1);
   } finally {
     restoreInnerHtml();
+    dom.window.close();
+  }
+});
+
+test("Teams refuses configuration from a stale bridge that cannot provide the widget theme", () => {
+  const { dom, openedWindows, bridgeWindow } = makeDom("https://teams.microsoft.com/v2/");
+  const port = { onmessage: null, start() {}, postMessage() {} };
+  try {
+    dom.window.eval(runtime);
+    const root = dom.window.document.getElementById("chatbut-runtime");
+    const nonce = new URL(openedWindows[0].url).hash.slice(1).split(".")[1];
+    dom.window.dispatchEvent(new dom.window.MessageEvent("message", {
+      data: { type: "chatbut:bridge-port", nonce },
+      origin: "https://jiannystein.github.io",
+      source: bridgeWindow,
+      ports: [port],
+    }));
+    port.onmessage({ data: { type: "chatbut:config", nonce, config: teamsRuntimeConfig() } });
+    assert.match(root.querySelector('[data-role="status"]').textContent, /replace this bookmark/i);
+    assert.equal(root.querySelector('[data-role="enable"]').disabled, true);
+    assert.equal(root.chatbutRuntime.config, null);
+  } finally {
     dom.window.close();
   }
 });
@@ -143,7 +165,8 @@ test("Teams work or school v2 uses the two-tab handoff and excludes meetings fro
 
 test("trusted manual typing in Teams self chat queues one automatic test response", async () => {
   const html = `<!doctype html><html><head></head><body>
-    <span data-tid="me-control-displayname">Operator</span>
+    <button data-tid="me-control-avatar-trigger" aria-label="Your profile">Profile</button>
+    <button aria-label="Change the group profile picture">Group picture</button>
     <div role="treeitem" aria-level="2" aria-selected="true" tabindex="0" data-item-type="chat" data-fui-tree-item-value="self|chat|48:notes" aria-label="Self chat"><span>Self chat</span></div>
     <div data-tid="chat-pane-item"><span data-tid="message-author-name">Operator (You)</span><div data-tid="chat-pane-message" data-mid="baseline"><span data-message-content>Earlier note</span></div></div>
     <div role="textbox" contenteditable="true" data-tid="ckeditor"></div>
@@ -153,6 +176,21 @@ test("trusted manual typing in Teams self chat queues one automatic test respons
   const sent = [];
   const port = { onmessage: null, start() {}, postMessage(message) { sent.push(message); } };
   const composer = dom.window.document.querySelector('[data-tid="ckeditor"]');
+  const profile = dom.window.document.querySelector('[data-tid="me-control-avatar-trigger"]');
+  profile.addEventListener("click", () => {
+    dom.window.document.body.insertAdjacentHTML("beforeend", `
+      <div data-tid="me-control-menu-dialog" style="position:fixed">
+        <span data-tid="me-control-displayname">Operator</span>
+      </div>
+    `);
+    for (const element of dom.window.document.querySelectorAll('[data-tid="me-control-menu-dialog"], [data-tid="me-control-displayname"]')) {
+      Object.defineProperty(element, "offsetParent", { configurable: true, get: () => null });
+      Object.defineProperty(element, "getClientRects", {
+        configurable: true,
+        value: () => [{ width: 80, height: 20 }],
+      });
+    }
+  });
   const originalAddEventListener = composer.addEventListener.bind(composer);
   let beforeInput = null;
   composer.addEventListener = (type, handler, options) => {
@@ -174,12 +212,15 @@ test("trusted manual typing in Teams self chat queues one automatic test respons
         type: "chatbut:config",
         nonce,
         config: teamsRuntimeConfig(),
+        widgetCss: "#chatbut-runtime{border-radius:10px}",
         fileName: "Browser-local configuration",
       },
     });
     await new Promise((resolve) => setTimeout(resolve, 30));
     root.querySelector('[data-role="override"]').click();
-    await new Promise((resolve) => setTimeout(resolve, 30));
+    for (let attempt = 0; attempt < 20 && root.querySelector('[data-role="mode"]').textContent !== "Enabled"; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
     assert.equal(root.querySelector('[data-role="mode"]').textContent, "Enabled");
     assert.equal(typeof beforeInput, "function");
     beforeInput({ isTrusted: true });
