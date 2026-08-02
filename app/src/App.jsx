@@ -1857,6 +1857,8 @@ export function App() {
             config={config}
             setConfig={setConfig}
             setMessage={setMessage}
+            platform={activePlatform}
+            setPlatform={setActivePlatform}
           />
         ) : null}
       </main>
