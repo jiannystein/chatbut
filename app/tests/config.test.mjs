@@ -21,6 +21,16 @@ import { isNewerRelease, RELEASE_VERSION } from "../src/release.js";
 
 const appSource = await readFile(new URL("../src/App.jsx", import.meta.url), "utf8");
 
+test("Safety panel receives the active platform state", () => {
+  const safetyPanelRender = appSource.match(
+    /\{configured && activeSection === "safety" \? \(\s*<SafetyPanel[\s\S]*?\/>\s*\) : null\}/,
+  )?.[0];
+
+  assert.ok(safetyPanelRender, "SafetyPanel render block should exist");
+  assert.match(safetyPanelRender, /platform=\{activePlatform\}/);
+  assert.match(safetyPanelRender, /setPlatform=\{setActivePlatform\}/);
+});
+
 test("normalization constrains values and migrates a legacy DeepSeek config", () => {
   const normalized = normalizeConfig({
     schedule: { days: [1, 1, 9, "2"], start: "6:00", end: "25:00" },
