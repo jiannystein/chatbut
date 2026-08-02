@@ -116,14 +116,7 @@ to acknowledge receipt and defer the conversation respectfully.
 - Manual activity protects that conversation from further automatic replies
   during the session.
 
-No automated scanner can prove that software is safe. This public repository
-uses test-gated builds, GitHub secret scanning and push protection, and
-GitGuardian pull-request checks to reduce avoidable risk. Independent review is
-welcome.
-
-Please read [SECURITY.md](SECURITY.md) before using Chatbut with workplace
-conversations. Local-only operation does not automatically make a tool
-policy-approved.
+More detail is available in [SECURITY.md](SECURITY.md).
 
 ## Limitations
 
